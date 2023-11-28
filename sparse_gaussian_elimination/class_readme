@@ -1,0 +1,19 @@
+
+Copy the files:
+   main.c
+   rcm.c
+   solver.c
+   solver.h
+   sparse.h
+
+   mindeg.h
+   mindeg.c
+   colamd.c
+   colamd.h
+
+Makefile:
+
+   makefile
+
+The correct code will solve the test problems
+with a small relative error. (i.e. < 10^-{10})

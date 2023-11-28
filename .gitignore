@@ -1,1 +1,6 @@
 MNIST
+ckpt.pth
+.DS_Store
+*.o
+*.out
+*.so
