@@ -1,6 +1,7 @@
 MNIST
 ckpt.pth
 .DS_Store
+**/__pycache__/
 *.o
 *.out
 *.so
