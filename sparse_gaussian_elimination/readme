@@ -1,0 +1,20 @@
+
+C - conj grad solver
+
+  solver.c   C solver code
+
+  iter_c.f    f77 calls solver.c
+
+      ysmp2.f  Yale sparse matrix code
+
+      rcmred.f   rdm ordering code
+
+      etime.c  clock call
+
+xlf -c iter_c.f
+cc -c solver.c etime.c
+  xlf -c ysmp2.f rcmred.f
+
+xlf *.o
+
+f77 version of whold thing -> iter_93.f    
