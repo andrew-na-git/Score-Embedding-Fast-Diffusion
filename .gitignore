@@ -1,7 +1,10 @@
 MNIST
 ckpt.pth
+model.pth
 .DS_Store
 **/__pycache__/
 *.o
 *.out
 *.so
+.venv
+animation.gif

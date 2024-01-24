@@ -1,6 +1,7 @@
 import ctypes
 import numpy as np
-
+import os
+dir = os.path.dirname(os.path.abspath(__file__))
 
 def sparse_solve(A, b, order="rcm"):
     assert (
@@ -15,7 +16,7 @@ def sparse_solve(A, b, order="rcm"):
     elif order == "original":
         num_order = 0
 
-    c_lib = ctypes.CDLL("./sparse_gaussian_elimination/a.so")
+    c_lib = ctypes.CDLL(os.path.join(dir, "sparse_gaussian_elimination/a.so"))
     c_lib.solve_sparse.argtypes = (
         np.ctypeslib.ndpointer(dtype=np.double, ndim=2, flags="C_CONTIGUOUS"),
         np.ctypeslib.ndpointer(dtype=np.double, ndim=1, flags="C_CONTIGUOUS"),
