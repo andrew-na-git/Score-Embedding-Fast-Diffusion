@@ -15,8 +15,6 @@ from torch.utils.data import DataLoader
 from kfp import construct_A, construct_B, diffusion_coeff, construct_R, construct_P, construct_P_block, construct_R_block, gauss_seidel, solve_pde, logsumexp
 from network import ScoreNet
 
-torch.manual_seed(0)
-np.random.seed(0)
 torch.set_default_device('cuda')
 
 
@@ -26,10 +24,8 @@ if not os.path.isfile("../sparse_gaussian_elimination/a.so"):
 
 # download mnist dataset
 mnist = MNIST('.', train=True, transform=transforms.ToTensor(), download=True)
-data_loader = DataLoader(list(filter(lambda i: i[1] == 5, mnist))[:1], shuffle=True, generator=torch.Generator(device='cuda'))
-
-# hundred = list(range(100))
-# mnist_subset = torch.utils.data.Subset(mnist, hundred)
+#data_loader = DataLoader(list(filter(lambda i: i[1] == 5, mnist))[:1], shuffle=True, generator=torch.Generator(device='cuda'))
+mnist_data = mnist.data[mnist.targets == 5][:10]
 # mnist_data = np.moveaxis(mnist.data.numpy(), 0, -1)
 # mnist_data.shape
 #mnist_data = np.array(mnist)
@@ -39,7 +35,7 @@ batch_size = 32
 N = 10
 H = 28
 W = 28
-epoch = 20
+epoch = 3
 eps = 1e-6
 
 #data_loader = DataLoader(mnist_subset, batch_size=1, shuffle=True, num_workers=0, generator=torch.Generator(device='cuda'))
@@ -64,8 +60,8 @@ random_t = np.sort(random_t) # we sort the time in increasing order for denoisin
 time_ = np.insert(random_t, 0, eps).astype(np.float32) # for denoising we want time 0 to always be in sample to train
 sigma_ = diffusion_coeff(torch.tensor(time_), sigma).detach().cpu().numpy()
 
-for x_ , _ in data_loader:
-  data = x_.reshape(28, 28)
+for x_ in mnist_data:
+  data = x_
 
   x = torch.zeros((N, 1, H, W))
   m = np.zeros((N, H*W), dtype=np.float32)
@@ -162,5 +158,5 @@ for x_ , _ in data_loader:
 
     scores = (y_pred/lm).clone().detach().cpu().numpy().reshape((N, H, W)) # we normalize before fedding back into PDE
 
-torch.save(model_score.state_dict(), 'model.pth')
+torch.save(model_score.state_dict(), 'model_test.pth')
 print(f"\nmodel has been saved")
