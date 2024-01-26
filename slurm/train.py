@@ -10,13 +10,11 @@ import torch
 from torchvision.datasets import MNIST
 import torchvision.transforms as transforms
 from torch.optim import Adam
-from torch.utils.data import DataLoader
 
 from kfp import construct_A, construct_B, diffusion_coeff, construct_R, construct_P, construct_P_block, construct_R_block, gauss_seidel, solve_pde, logsumexp
 from network import ScoreNet
 
 torch.set_default_device('cuda')
-
 
 # create a.so if doesnt exists
 if not os.path.isfile("../sparse_gaussian_elimination/a.so"):
@@ -25,7 +23,7 @@ if not os.path.isfile("../sparse_gaussian_elimination/a.so"):
 # download mnist dataset
 mnist = MNIST('.', train=True, transform=transforms.ToTensor(), download=True)
 #data_loader = DataLoader(list(filter(lambda i: i[1] == 5, mnist))[:1], shuffle=True, generator=torch.Generator(device='cuda'))
-mnist_data = mnist.data[mnist.targets == 5][:10]
+mnist_data = mnist.data[mnist.targets == 5][:100] # grab the first 10 fives
 # mnist_data = np.moveaxis(mnist.data.numpy(), 0, -1)
 # mnist_data.shape
 #mnist_data = np.array(mnist)
@@ -35,7 +33,7 @@ batch_size = 32
 N = 10
 H = 28
 W = 28
-epoch = 3
+epoch = 12
 eps = 1e-6
 
 #data_loader = DataLoader(mnist_subset, batch_size=1, shuffle=True, num_workers=0, generator=torch.Generator(device='cuda'))
@@ -59,43 +57,44 @@ random_t = np.insert(random_t, 0, 1)
 random_t = np.sort(random_t) # we sort the time in increasing order for denoising
 time_ = np.insert(random_t, 0, eps).astype(np.float32) # for denoising we want time 0 to always be in sample to train
 sigma_ = diffusion_coeff(torch.tensor(time_), sigma).detach().cpu().numpy()
+scores = np.zeros((len(mnist_data) ,N, H, W), dtype=np.float32)
 
-for x_ in mnist_data:
-  data = x_
+for e in tqdm(range(epoch)):
+  for idx, x_ in enumerate(mnist_data):
+    data = x_
 
-  x = torch.zeros((N, 1, H, W))
-  m = np.zeros((N, H*W), dtype=np.float32)
-  del_m = np.zeros_like(m, dtype=np.float32)
-  
-  dx = data.detach().numpy().max()/H
-  dy = data.detach().numpy().max()/W
-  x[0] = torch.tensor(mm_scaler.fit_transform(data.ravel()[:, None]).astype(np.float32)).reshape((1, 1, H, W))
-  kde = KernelDensity(kernel='gaussian').fit(data.ravel()[:, None])
-  m[0] = kde.score_samples(data.ravel()[:, None])
-  del_m[0] = np.diff(m[0].ravel(), axis=0, prepend=m[0,0])
-  m_c = np.zeros((N, int((H*W/4))), dtype=np.float32)
-  del_m_c = np.zeros_like(m_c, dtype=np.float32)
+    x = torch.zeros((N, 1, H, W))
+    m = np.zeros((N, H*W), dtype=np.float32)
+    del_m = np.zeros_like(m, dtype=np.float32)
+    
+    dx = data.detach().numpy().max()/H
+    dy = data.detach().numpy().max()/W
+    x[0] = torch.tensor(mm_scaler.fit_transform(data.ravel()[:, None]).astype(np.float32)).reshape((1, 1, H, W))
+    kde = KernelDensity(kernel='gaussian').fit(data.ravel()[:, None])
+    m[0] = kde.score_samples(data.ravel()[:, None])
+    del_m[0] = np.diff(m[0].ravel(), axis=0, prepend=m[0,0])
+    m_c = np.zeros((N, int((H*W/4))), dtype=np.float32)
+    del_m_c = np.zeros_like(m_c, dtype=np.float32)
 
-  perturbed_x = torch.zeros_like(x)
-  scores = np.zeros((N, H, W), dtype=np.float32)
+    perturbed_x = torch.zeros_like(x)
 
-  for e in tqdm(range(epoch)):
-    # we normalize for sigma to ensure the dynamics doesn't blow up
+    #for e in tqdm(range(epoch)):
+      # we normalize for sigma to ensure the dynamics doesn't blow up
     A_block = []
     for i, t_ in enumerate(random_t, 1):
-      A = construct_A(dx, dy, t_ - time_[i-1], np.zeros((H, W)), sigma_[i], scores[i], H, W)
+      A = construct_A(dx, dy, t_ - time_[i-1], np.zeros((H, W)), sigma_[i], scores[idx][i], H, W)
       if i == 1:
         A_block = sp.linalg.block_diag(A)
       else:
         A_block = sp.linalg.block_diag(A_block, A)
         A_block[(i-1)*H*W:i*H*W, (i-2)*H*W:(i-1)*H*W] = -np.eye((H*W))/(t_ - time_[i-1])
 
-    B = construct_B(dx, dy, time_[1] - time_[0], m[0], np.zeros((H, W)), sigma_[1], scores[1])
+    B = construct_B(dx, dy, time_[1] - time_[0], m[0], np.zeros((H, W)), sigma_[1], scores[idx][1])
     B_block = np.zeros(A_block.shape[0])
     B_block[:H*W] = B
 
     # update m (pre-smoothing)
-    m[1:] = gauss_seidel(A_block, B_block, scores[1:].flatten()).reshape(((N-1), H*W))
+    m[1:] = gauss_seidel(A_block, B_block, scores[idx][1:].flatten()).reshape(((N-1), H*W))
     R = construct_R(int(H/2), int(H))
     P = construct_P(R)
     R_block = []
@@ -156,7 +155,7 @@ for x_ in mnist_data:
     optimizer.step()
     losses = loss.item()
 
-    scores = (y_pred/lm).clone().detach().cpu().numpy().reshape((N, H, W)) # we normalize before fedding back into PDE
+    scores[idx] = (y_pred/lm).clone().detach().cpu().numpy().reshape((N, H, W)) # we normalize before fedding back into PDE
 
-torch.save(model_score.state_dict(), 'model_test.pth')
+torch.save(model_score.state_dict(), 'model.pth')
 print(f"\nmodel has been saved")
