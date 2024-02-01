@@ -47,10 +47,11 @@ void solve_system(double* A, double* b, int* ia, int* ja, double* x, int n, int 
   // printf("time before symbolic factor %12.4g\n",
   //        (double)clock() / CLOCKS_PER_SEC);
 
+  struct sparse_row* rowsp;
   if (sfac_type == 0) {
-    sfac_dumb(ia, ja, n, lorder, invord, &nzero, &ier);
+    rowsp = sfac_dumb(ia, ja, n, lorder, invord, &nzero, &ier);
   } else {
-    sfac_smart(ia, ja, n, lorder, invord, &nzero, &ier);
+    rowsp = sfac_smart(ia, ja, n, lorder, invord, &nzero, &ier);
   }
 
   // printf("time after symm factor %12.4g\n",
@@ -66,19 +67,19 @@ void solve_system(double* A, double* b, int* ia, int* ja, double* x, int n, int 
   // printf("time before num factor %12.4g\n",
   //        (double)clock() / CLOCKS_PER_SEC);
 
-  factor(ia, ja, lorder, invord, n, A);
+  factor(ia, ja, lorder, invord, n, A, rowsp);
 
   // printf("time after num factor %12.4g\n",
   //        (double)clock() / CLOCKS_PER_SEC);
 
-  solve(x, b, n, lorder);
+  solve(x, b, n, lorder, rowsp);
 
   // printf("time after solve %12.4g\n",
   //        (double)clock() / CLOCKS_PER_SEC);
 
   /*       free storage for ilu factors   */
 
-  clean(n);
+  clean(n, rowsp);
 
   double maxerr = 0.0;
   for (i = 0; i <= n - 1; i++) {

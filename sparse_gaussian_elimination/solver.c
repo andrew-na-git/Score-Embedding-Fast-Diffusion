@@ -2,12 +2,11 @@
 #include <math.h>
 #include <assert.h>   
 #include <stdlib.h>
-#include "sparse.h"
 
 #include "solver.h"
       /* sparse_row defined in solver.h */
 
-struct sparse_row *rowsp;
+//struct sparse_row *rowsp;
         /* globally visible structure */
 
 /*   
@@ -22,7 +21,7 @@ struct sparse_row *rowsp;
 
  
 void  merge_smart( int i,  int list[],
-           int n ,  int link[]) 
+           int n ,  int link[], struct sparse_row *rowsp) 
 
 /*
   input
@@ -49,7 +48,7 @@ void  merge_smart( int i,  int list[],
 
 
 {
-      extern struct sparse_row *rowsp;
+      //extern struct sparse_row *rowsp;
    int row, next, oldlst,  ii;
    int nxtlst;
 
@@ -185,7 +184,7 @@ void sortq( int* v, int left, int right)
 
 /*    symblic factor */
 
- void sfac_smart(
+ struct sparse_row* sfac_smart(
   int* ia, int* ja, int n, int* lorder, int* invord,
     int* nzero, int* ier)
 
@@ -212,13 +211,13 @@ void sortq( int* v, int left, int right)
      int   iold, iend, num,  next;
       int nrow_tmp, icol, itemp;
       int  nrow,  found;
-      extern struct sparse_row *rowsp;
+      //extern struct sparse_row *rowsp;
       int *int_temp, *link, *icount;
  
 
 /*     allocate array of structures, each structue points to  row  */
 
-    rowsp = (struct sparse_row *) calloc( n, sizeof( struct sparse_row) );
+    struct sparse_row* rowsp = (struct sparse_row *) calloc( n, sizeof( struct sparse_row) );
          assert( rowsp != NULL);
 
 /*     allocate temp wkspace      */
@@ -293,7 +292,7 @@ void sortq( int* v, int left, int right)
                printf(" pre rows %d", itemp);
           }
           printf(" \n");    */
-            merge_smart( i,  list, n,  link);
+            merge_smart( i,  list, n,  link, rowsp);
  
 /*                count up nonzeros in this row  */
 
@@ -347,7 +346,6 @@ void sortq( int* v, int left, int right)
       printf(" \n ");   */
 
 
-
     }
 
 
@@ -376,13 +374,13 @@ void sortq( int* v, int left, int right)
          free( link);
          free( icount);
 
-      return;
+      return rowsp;
 }
       
 /*       numeric factor  */
 
  void factor(int* ia, int* ja, int* lorder, int* invord, 
-                int n,  double* a) 
+                int n,  double* a, struct sparse_row *rowsp) 
  
 /* numeric factor   */
 
@@ -406,7 +404,7 @@ output
       int i, iold, id, ii, idd, iii;
       int    *ptr_jaf;
       double mult, *row, *ptr_af;
-     extern struct sparse_row *rowsp;
+     //extern struct sparse_row *rowsp;
 
 
 /*      allocate temp wkspace    */
@@ -476,7 +474,7 @@ output
 
 
          void solve( double* x, double* b,  int n,
-                  int* lorder)
+                  int* lorder, struct sparse_row *rowsp)
 
 /*     forward and back solve
          solve LU x = b
@@ -496,7 +494,7 @@ output:
 
 
 {
-      extern struct sparse_row *rowsp;
+      //extern struct sparse_row *rowsp;
       int i, ii, *ptr_jaf;
       double *temp, *ptr_af;
  
@@ -555,7 +553,7 @@ output:
 
 /*    free space for lu in after finished  */
  
- void clean( int n )
+ void clean( int n, struct sparse_row *rowsp)
 
 /*
    input:
@@ -570,7 +568,7 @@ output:
  
 {
     int   i;
-    extern struct sparse_row *rowsp;
+    //extern struct sparse_row *rowsp;
  
  
        for(i=0; i<=n-1; i++){
@@ -586,7 +584,7 @@ output:
 }
 
 
- void sfac_dumb(
+ struct sparse_row* sfac_dumb(
    int* ia, int* ja, int n, int* lorder, int* invord,
     int* nzero, int* ier)
 {
@@ -611,13 +609,13 @@ output:
      int  first, iold, iend, num, next;
       int  nrow_tmp;
       int itemp, nrow;
-      extern struct sparse_row *rowsp;
+      //extern struct sparse_row *rowsp;
       int *int_temp;
  
 
 /*     allocate array of structures, each structue points to  row  */
 
-    rowsp = (struct sparse_row *) calloc( n, sizeof( struct sparse_row) );
+    struct sparse_row* rowsp = (struct sparse_row *) calloc( n, sizeof( struct sparse_row) );
          assert( rowsp != NULL);
 
 /*     allocate temp wkspace      */
@@ -670,7 +668,7 @@ output:
 
  
             merge_dumb( i,  list,
-              n, first);
+              n, first, rowsp);
  
 /*                count up nonzeros in this row  */
 
@@ -713,8 +711,6 @@ output:
       }
       printf(" \n ");     */
 
-
-
     }
 
 
@@ -724,11 +720,11 @@ output:
          free(int_temp);
          free( list );
 
-      return;
+      return rowsp;
 }
       
 void  merge_dumb( int i,  int* list,
-           int n, int first) 
+           int n, int first, struct sparse_row *rowsp) 
 
 /*
   input
@@ -752,7 +748,7 @@ void  merge_dumb( int i,  int* list,
 
 
 {
-      extern struct sparse_row *rowsp;
+      //extern struct sparse_row *rowsp;
    int row, next, oldlst,  ii;
    int nxtlst;
 

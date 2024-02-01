@@ -23,18 +23,19 @@ class Dense(nn.Module):
     return self.dense(x)[..., None, None]
 
 class Coarse(nn.Module):
-  def __init__(self, H, W):
+  def __init__(self, H, W, channels=1):
     super().__init__()
     self.H = H
     self.W = W
-    self.invcoarse = nn.ConvTranspose2d(1, 1, 2, stride=2, bias=True)
+    self.channels = channels
+    self.invcoarse = nn.ConvTranspose2d(channels, channels, 2, stride=2, bias=True)
   def forward(self, x):
-    return self.invcoarse(x).reshape((-1, 1, int(self.H), int(self.W)))
+    return self.invcoarse(x).reshape((-1, self.channels, int(self.H), int(self.W)))
 
 class ScoreNet(nn.Module):
   """A time-dependent score-based model built upon U-Net architecture."""
 
-  def __init__(self, channels=[32, 64, 128, 256], embed_dim=256, H = 28, W = 28):
+  def __init__(self, channels=[32, 64, 128, 256], embed_dim=256, H = 28, W = 28, in_channels=1):
     """Initialize a time-dependent score-based network.
 
     Args:
@@ -46,9 +47,9 @@ class ScoreNet(nn.Module):
     self.embed = nn.Sequential(GaussianFourierProjection(embed_dim=embed_dim),
          nn.Linear(embed_dim, embed_dim))
     # for Coarse matrices we want to upscale
-    self.coarse = Coarse(H, W)
+    self.coarse = Coarse(H, W, in_channels)
     # Encoding layers where the resolution decreases
-    self.conv1 = nn.Conv2d(1, channels[0], 3, stride=1, bias=True)
+    self.conv1 = nn.Conv2d(in_channels, channels[0], 3, stride=1, bias=True)
     self.dense1 = Dense(embed_dim, channels[0])
     self.gnorm1 = nn.GroupNorm(4, num_channels=channels[0])
     self.conv2 = nn.Conv2d(channels[0], channels[1], 3, stride=2, bias=False)
@@ -71,7 +72,7 @@ class ScoreNet(nn.Module):
     self.tconv2 = nn.ConvTranspose2d(channels[1] + channels[1], channels[0], 3, stride=2, bias=False, output_padding=1)
     self.dense7 = Dense(embed_dim, channels[0])
     self.tgnorm2 = nn.GroupNorm(32, num_channels=channels[0])
-    self.tconv1 = nn.ConvTranspose2d(channels[0] + channels[0], 1, 3, stride=1)
+    self.tconv1 = nn.ConvTranspose2d(channels[0] + channels[0], in_channels, 3, stride=1)
 
     # The swish activation function
     self.act = lambda x: x * torch.nn.functional.sigmoid(x)

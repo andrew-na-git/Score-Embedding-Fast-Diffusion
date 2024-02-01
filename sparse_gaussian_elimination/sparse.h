@@ -1,3 +1,5 @@
+#ifndef SPARSE_H
+#define SPARSE_H
   struct sparse_row {
        int *jaf;
        double *af;
@@ -13,3 +15,4 @@
         of the row  ie k = row.diag -> af[k] = diag entry 
 */
 
+#endif

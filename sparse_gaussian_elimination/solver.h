@@ -1,3 +1,4 @@
+#include "sparse.h"
 
 void shell(int* v, int n);
 /*    shellsort:  sort v[0],... v[n-1]
@@ -18,16 +19,16 @@ double dblemax( double a, double b);
 
 
 void  merge_smart( int i,  int* list,
-           int n ,  int* link);
+           int n ,  int* link, struct sparse_row *rowsp);
 /*  see comments in source code */
 
 
 void  merge_dumb( int i,  int* list,
-           int n, int first);
+           int n, int first, struct sparse_row *rowsp);
 /* see comments in source file */
 
 
-void sfac_smart(
+struct sparse_row* sfac_smart(
   int* ia, int* ja, int n, int* lorder, int* invord,
     int* nzero, int* ier);
 
@@ -48,7 +49,7 @@ void sfac_smart(
 */
 
 
-void sfac_dumb(
+struct sparse_row* sfac_dumb(
    int* ia, int* ja, int n, int* lorder, int* invord,
     int* nzero, int* ier);
 
@@ -71,7 +72,7 @@ void sfac_dumb(
 
 
 void factor(int* ia, int* ja, int* lorder, int* invord,
-                int n,  double* a);
+                int n,  double* a, struct sparse_row *rowsp);
 
 /* numeric factor   */
 
@@ -92,7 +93,7 @@ output
 
 
 void solve( double* x, double* b,  int n,
-                  int* lorder);
+                  int* lorder, struct sparse_row *rowsp);
 
 /*     forward and back solve
          solve LU x = b
@@ -111,7 +112,7 @@ output:
 */
 
 
-void clean( int n );
+void clean( int n, struct sparse_row *rowsp );
 
 /*
    input:

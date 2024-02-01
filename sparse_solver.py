@@ -6,7 +6,7 @@ dir = os.path.dirname(os.path.abspath(__file__))
 def sparse_solve(A, b, order="rcm"):
     assert (
         order == "rcm" or order == "min_degree" or order == "original"
-    ), "Order musst be either 'rcm', 'min_degree', or 'original'"
+    ), "Order must be either 'rcm', 'min_degree', or 'original'"
     n = len(A)
 
     if order == "rcm":
