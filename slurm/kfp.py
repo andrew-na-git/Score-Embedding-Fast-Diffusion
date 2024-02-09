@@ -42,6 +42,8 @@ def construct_P(R):
 def solve_pde(A,b,mode='dense'):
   if mode == 'dense':
     return sp.linalg.solve(A, b)
+  if mode == "sp_sparse":
+    return sp.sparse.linalg.spsolve(A, b)
   if mode == 'sparse':
     return sparse_solve(A, b)
 

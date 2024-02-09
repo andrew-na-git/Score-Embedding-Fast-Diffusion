@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <string.h>
+#include <time.h>
 
 /*    prototypes  */
 
@@ -96,60 +98,67 @@ void solve_system(double* A, double* b, int* ia, int* ja, double* x, int n, int 
 }
 
 struct CSRMatrix {
+  int factored; // bool
   int index;
-  const int n;
-  const double* A;
+  int n;
+  double* A;
   int total_nnz;
   int* row_nnz;
+  int* col_idx;
   int* ja;
+  int* ia;
   pthread_mutex_t lock;
+  pthread_mutex_t t_lock;
 };
 
+struct CSRMatrix mat = {
+  0,
+  0,
+  0,
+  NULL,
+  0,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  PTHREAD_MUTEX_INITIALIZER,
+  PTHREAD_MUTEX_INITIALIZER
+};
+
+void init() {
+  pthread_mutex_init(&mat.lock, NULL);
+  pthread_mutex_init(&mat.t_lock, NULL);
+}
+
 void* thread_process(void* mat_struct) {
-  struct CSRMatrix* mat = (struct CSRMatrix*)mat_struct;
-  pthread_mutex_lock(&mat->lock);
+  pthread_mutex_lock(&mat.t_lock);
   int cur, nnz, i;
-  while (mat->index < mat->n) {
-    cur = mat->index;
-    mat->index += 1;
-    pthread_mutex_unlock(&mat->lock);
+  while (mat.index < mat.n) {
+    cur = mat.index;
+    mat.index += 1;
+    pthread_mutex_unlock(&mat.t_lock);
     nnz = 0;
 
-    for (i = 0; i < mat->n; ++i) {
-      if (mat->A[cur * mat->n + i] != 0 || mat->A[i * mat->n + cur] != 0) {
-        mat->ja[cur * mat->n + nnz] = i;
+    for (i = 0; i < mat.n; ++i) {
+      if (mat.A[cur * mat.n + i] != 0 || mat.A[i * mat.n + cur] != 0) {
+        mat.col_idx[cur * mat.n + nnz] = i;
         nnz += 1;
       }
     }
-    mat->row_nnz[cur] = nnz;
-    pthread_mutex_lock(&mat->lock);
-    mat->total_nnz += nnz;
+    mat.row_nnz[cur] = nnz;
+    pthread_mutex_lock(&mat.t_lock);
+    mat.total_nnz += nnz;
   }
-  pthread_mutex_unlock(&mat->lock);
+  pthread_mutex_unlock(&mat.t_lock);
 
   return NULL;
 }
 
-void solve_sparse(double* arr, double* b, double* x, int n, int order) {
-
-  if (order == 1 && arr[1] == 0) {
-    order = 2;
-  }
-
-  struct CSRMatrix mat = {
-      0,
-      n,
-      arr,
-      0,
-      (int*)malloc(sizeof(int) * n),
-      (int*)malloc(sizeof(int) * n * n),
-      PTHREAD_MUTEX_INITIALIZER};
-
-  pthread_mutex_init(&mat.lock, NULL);
-
+void factor_ia_ja() {
   int i, j;
+  
 
-  const int num_threads = 1;
+  const int num_threads = 4;
   pthread_t* threads = malloc(sizeof(pthread_t) * num_threads);
   int create_status;
   for (i = 0; i < num_threads; ++i) {
@@ -160,22 +169,54 @@ void solve_sparse(double* arr, double* b, double* x, int n, int order) {
   for (i = 0; i < num_threads; ++i) {
     pthread_join(threads[i], NULL);
   }
-
-  int* ia = malloc(sizeof(int) * (n + 1));
-  int* ja = malloc(sizeof(int) * mat.total_nnz);
-  double* A = malloc(sizeof(double) * mat.total_nnz);
-
-  ia[0] = 0;
-
-  for (i = 0; i < n; ++i) {
-    ia[i + 1] = ia[i] + mat.row_nnz[i];
-  }
+  
+  mat.factored = 1;
+  mat.ia = malloc(sizeof(int) * (mat.n + 1));
+  mat.ja = malloc(sizeof(int) * mat.total_nnz);
+  mat.ia[0] = 0;
 
   int count = 0;
 
-  for (i = 0; i < n; ++i) {
+  for (i = 0; i < mat.n; ++i) {
+    mat.ia[i + 1] = mat.ia[i] + mat.row_nnz[i];
     for (j = 0; j < mat.row_nnz[i]; ++j) {
-      ja[count] = mat.ja[i * n + j];
+      mat.ja[count] = mat.col_idx[i * mat.n + j];
+      count += 1;
+    }
+  }
+
+  free(threads);
+}
+
+void solve_sparse(double* arr, double* b, double* x, int n, int order) {
+
+  if (order == 1 && arr[1] == 0) {
+    order = 2;
+  }
+  
+  pthread_mutex_lock(&mat.lock);
+  if (mat.factored == 0) {
+    mat.A = arr;
+    mat.n = n;
+    mat.row_nnz = (int*)malloc(sizeof(int) * n);
+    mat.col_idx = (int*)malloc(sizeof(int) * n * n);
+    factor_ia_ja();
+  }
+  pthread_mutex_unlock(&mat.lock);
+  
+  
+  double* A = malloc(sizeof(double) * mat.total_nnz);
+  int* ia = malloc(sizeof(int) * (n + 1));
+  ia[0] = 0;
+  int* ja = malloc(sizeof(int) * mat.total_nnz);
+  
+  int i, j;
+  int count = 0;
+
+  for (i = 0; i < n; ++i) {
+    ia[i+1] = mat.ia[i+1];
+    for (j = 0; j < mat.row_nnz[i]; ++j) {
+      ja[count] = mat.ja[count];
       A[count] = arr[i * n + ja[count]];
       count += 1;
     }
@@ -185,6 +226,7 @@ void solve_sparse(double* arr, double* b, double* x, int n, int order) {
 }
 
 int main() {
+  init();
   int n = 4;
   double* a = calloc(n * n, sizeof(double));
   double* b = calloc(n, sizeof(double));
