@@ -10,19 +10,17 @@ from sparse_solver import sparse_solve
 
 ## we construct coefficient matrix and constant matrix
 def construct_A(dx,dy,dt,g,s,H,W):
-  A = np.eye(H*W)/dt + (np.eye(H*W)*(g**2))/(dx**2) + (np.eye(H*W)*(g**2))/(dy**2)\
-                  - np.diag((0.5*np.ones(H*W)*(g**2))[1:],-1)/(dx**2) - np.diag((0.5*np.ones(H*W)*(g**2))[1:],1)/(dy**2) \
-                  - np.diag((0.5*np.ones(H*W)*(g**2))[:-1],1)/(dx**2) - np.diag((0.5*np.ones(H*W)*(g**2))[:-1],-1)/(dy**2)\
-                  + np.diag((-0.5*(g**2)*s)[1:],-1)/(2*dx) + np.diag((-0.5*(g**2)*s)[1:],1)/(2*dy)\
-                  - np.diag((-0.5*(g**2)*s)[:-1],1)/(2*dx) - np.diag((-0.5*(g**2)*s)[:-1],-1)/(2*dy)
+  A = np.eye(H*W) + (np.eye(H*W)*(g**2)*dt)/(dx**2) + (np.eye(H*W)*(g**2)*dt)/(dy**2)\
+                  - np.diag((0.5*np.ones(H*W)*(g**2)*dt)[1:],-1)/(dx**2) - np.diag((0.5*np.ones(H*W)*(g**2)*dt)[1:],1)/(dy**2) \
+                  - np.diag((0.5*np.ones(H*W)*(g**2)*dt)[:-1],1)/(dx**2) - np.diag((0.5*np.ones(H*W)*(g**2)*dt)[:-1],-1)/(dy**2)
   return A
 
-def construct_B(dx,dy,dt,m_prev,f,df,s,i):
-  # if i == 1:
-  B = m_prev - (df*dt/dx + df*dt/dy) - (f*s*dt/(2*dx) + f*s*dt/(2*dy))
-  # else:
-  #   B = - (df*dt/dx + df*dt/dy)  - (f*s*dt/dx + f*s*dt/dy)
-  return B/dt
+def construct_B(dx,dy,dt,m_prev,f,g,df,s,i):
+  if i == 1:
+    B = m_prev - (df*dt/dx + df*dt/dy) - (f*s*dt/(2*dx) + f*s*dt/(2*dy)) + (0.5*(g**2)*(s**2)*dt)
+  else:
+    B = - (df*dt/dx + df*dt/dy) - (f*s*dt/dx + f*s*dt/dy) + (0.5*(g**2)*(s**2)*dt)
+  return B
 
 def construct_P(M,N):
   P = np.zeros((M,N))
@@ -63,12 +61,8 @@ def construct_P_block(P, P_block, i):
     P_block = sp.linalg.block_diag(P_block, P)
   return P_block
 
-def gauss_seidel(A, b, x, N, smoothing ='pre'):
-  if smoothing == 'pre':
-    iteration = 2
-  if smoothing == 'post':
-    iteration = 2
-
+def gauss_seidel(A, b, x, N):
+  iteration = 10
   for _ in range(iteration):
     lu = sparse.linalg.splu(sparse.csc_matrix(A))
     I = sparse.identity(N, format='csr')
@@ -79,7 +73,8 @@ def gauss_seidel(A, b, x, N, smoothing ='pre'):
   return x
 
 def jacobi(A, b, x, N):
-  for _ in range(5):
+  iteration = 10
+  for _ in range(iteration):
     lu = sparse.linalg.splu(sparse.csc_matrix(A))
     diag_A = np.diag(A)
     I = sparse.identity(N, format='csr')
