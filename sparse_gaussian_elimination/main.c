@@ -15,7 +15,6 @@
 #include "mindeg.h"
 
 void solve_system(double* A, double* b, int* ia, int* ja, double* x, int n, int norder) {
-
   /*  needs to be size n+1 for colamd */
   int* lorder = (int*)calloc(n + 1, sizeof(int));
   assert(lorder != NULL);
@@ -221,7 +220,9 @@ void solve_sparse(double* arr, double* b, double* x, int n, int order) {
       count += 1;
     }
   }
-
+  for (i = 0; i < n + 1; ++i) {
+    printf("%d ", ia[i]);
+  }
   solve_system(A, b, ia, ja, x, n, order);
 }
 
