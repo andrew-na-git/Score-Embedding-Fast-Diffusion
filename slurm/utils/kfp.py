@@ -1,11 +1,8 @@
-import sys
-sys.path.append("..") # Adds higher directory to python modules path so we can access sparse_solve.py
-
 import numpy as np
 import scipy as sp
 from scipy import sparse
 
-from sparse_solver import sparse_solve
+from utils.sparse_solver import sparse_solve
 
 ## we construct coefficient matrix and constant matrix
 # def construct_A(dx,dy,dt,g,s,H,W):
@@ -33,6 +30,13 @@ def construct_B(dx, dy, dt, m_prev, f, g, s, i):
   else:
     B = - (df*dt/dx + df*dt/dy) - (f*s*dt/dx + f*s*dt/dy) + (0.5*(g**2)*(s**2)*dt)
   return B
+
+def get_B_block(dx, dy, time_, m, sigma_, channel, scores, H, W, N):
+  B_block = np.array([])
+  for i in range(N-1):
+    B_block = np.append(B_block, construct_B(dx, dy, time_[i+1] - time_[i], m[channel][i].ravel(), np.zeros((H, W)), sigma_[i+1], scores[i][channel].ravel(), i))
+  
+  return B_block
 
 def construct_P(M,N):
   P = np.zeros((M,N))

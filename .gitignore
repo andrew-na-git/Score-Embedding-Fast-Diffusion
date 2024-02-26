@@ -9,3 +9,5 @@ MNIST
 *.gif
 cifar-10-batches-py
 *.gz
+*.log
+reports/
