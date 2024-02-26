@@ -22,7 +22,7 @@ mm_scaler = MinMaxScaler();
 
 # Parameters
 
-device = "gpu" if torch.cuda.is_available() else "cpu"
+device = "cuda" if torch.cuda.is_available() else "cpu"
 eps = 1e-6
 
 params = {"bandwidth": np.logspace(-1, 1, 20)}
@@ -106,8 +106,8 @@ def train(dataset, N=10, H=28, W=28, channels=3, epochs=60, sigma=25):
         thread.join()
 
       y_pred = model_score(train_x_data.to(device), torch.tensor(time_[idx]).to(device))
-      lm = (2*torch.tensor(sigma_[idx])**2)[:, None, None, None]
-      loss = loss_fn(y_pred/lm, train_y_data)
+      lm = (2*torch.tensor(sigma_[idx])**2)[:, None, None, None].to(device)
+      loss = loss_fn(y_pred/lm, train_y_data.to(device))
       optimizer.zero_grad()
       loss.backward()
       optimizer.step()

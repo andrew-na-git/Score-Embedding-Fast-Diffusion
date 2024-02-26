@@ -10,7 +10,7 @@ import numpy as np
 from network.network import ScoreNet
 from utils.kfp import diffusion_coeff
 
-device = "gpu" if torch.cuda.is_available() else "cpu"
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 ## The error tolerance for the black-box ODE solver
 def ode_sampler(score_model,

@@ -8,7 +8,7 @@ import pandas as pd
 def create_report(model="FDM", model_path="model_fdm.pth", sigma=25, N=10, n_data=1, H=28, W=28):
     today = datetime.now(timezone('EST'))
 
-    model_title = f"FDM (sigma = {sigma})"
+    model_title = f"{model} (sigma = {sigma})"
     folder = f"reports/{model}_{today.strftime('%B-%d-%H:%M')}"
 
     Path(folder).mkdir(parents=True, exist_ok=True)
