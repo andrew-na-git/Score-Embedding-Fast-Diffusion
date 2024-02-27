@@ -5,6 +5,8 @@ from MG.train_MG_fast import train as train_mg
 from create_report import create_report
 from data.Dataset import CIFARDataset
 
+import torch
+
 parser = argparse.ArgumentParser(prog="Faster Diffusion with KFP")
 parser.add_argument("--model", default="FDM", choices=["FDM", "MG"])
 parser.add_argument("--sigma", default=25, type=int)
@@ -25,5 +27,5 @@ print("Begin training...")
 train(dataset, args.n_timestep, H, W, n_channels, args.epochs, args.sigma)
 
 print("Training finished. Generating report...")
-create_report(args.model, f"model_{args.model}.pth", args.sigma, args.n_timestep, n_data, H, W)
+create_report(args.model, f"model_{args.model}.pth", args.sigma, args.n_timestep, n_data, H, W, torch.cuda.is_available())
 print("Done")

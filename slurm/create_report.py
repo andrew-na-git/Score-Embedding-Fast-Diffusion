@@ -5,10 +5,10 @@ from pathlib import Path
 from sample.sample import sample
 import pandas as pd
 
-def create_report(model="FDM", model_path="model_fdm.pth", sigma=25, N=10, n_data=1, H=28, W=28):
+def create_report(model="FDM", model_path="model_fdm.pth", sigma=25, N=10, n_data=1, H=28, W=28, with_cuda = False):
     today = datetime.now(timezone('EST'))
 
-    model_title = f"{model} (sigma = {sigma})"
+    model_title = model
     folder = f"reports/{model}_{today.strftime('%B-%d-%H:%M')}"
 
     Path(folder).mkdir(parents=True, exist_ok=True)
@@ -84,6 +84,12 @@ def create_report(model="FDM", model_path="model_fdm.pth", sigma=25, N=10, n_dat
     pdf.cell(80)
     pdf.cell(10, 0, f"Number of time steps sampled: {N}")
     pdf.ln(7)
+    
+    pdf.cell(20)
+    pdf.cell(10, 0, f"With CUDA: {with_cuda}")
+    pdf.cell(80)
+    pdf.cell(10, 0, f"Sigma: {sigma}")
+    pdf.ln(7)
 
     pdf.cell(43)
     pdf.set_font('Times', 'B', 14)
@@ -91,7 +97,7 @@ def create_report(model="FDM", model_path="model_fdm.pth", sigma=25, N=10, n_dat
     pdf.cell(0, 10, 'Loss')
     pdf.ln(10)
     pdf.image(folder + "/time.jpeg", w=95, h=80)
-    pdf.image(folder + "/loss.jpeg", x=107, y=76, w=95, h=80)
+    pdf.image(folder + "/loss.jpeg", x=107, y=83, w=95, h=80)
 
     pdf.ln(10)
     pdf.cell(80)
@@ -100,3 +106,6 @@ def create_report(model="FDM", model_path="model_fdm.pth", sigma=25, N=10, n_dat
     pdf.image(folder + "/sample.jpeg",x=-21, w=250, h=45)
     pdf.output(folder + "/report.pdf", 'F')
     print(f"Report saved to {folder + '/report.pdf'}")
+
+if __name__ == "__main__":
+  create_report()

@@ -6,4 +6,4 @@
 
 source ../.venv/bin/activate
 
-python train.py
+python run.py
