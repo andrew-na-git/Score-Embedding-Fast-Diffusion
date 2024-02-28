@@ -9,17 +9,24 @@ from scipy.special import logsumexp, softmax, log_softmax
 from sparse_solver import sparse_solve
 
 ## we construct coefficient matrix and constant matrix
-def construct_A(dx,dy,dt,g,s,H,W):
-  A = np.eye(H*W) + (np.eye(H*W)*(g**2)*dt)/(dx**2) + (np.eye(H*W)*(g**2)*dt)/(dy**2)\
-                  - np.diag((0.5*np.ones(H*W)*(g**2)*dt)[1:],-1)/(dx**2) - np.diag((0.5*np.ones(H*W)*(g**2)*dt)[1:],1)/(dy**2) \
-                  - np.diag((0.5*np.ones(H*W)*(g**2)*dt)[:-1],1)/(dx**2) - np.diag((0.5*np.ones(H*W)*(g**2)*dt)[:-1],-1)/(dy**2)
+def construct_A(dx,dt,f,g,s,H,W):
+  h = dt/(2*dx)
+  h2 = dt/(dx**2)
+  A = np.eye(H*W) + np.diag((f*h)[1:],1)\
+                  - np.diag((f*h)[:-1],-1)\
+                  - np.diag(-1*(g**2)*np.ones_like(f)*h2)\
+                  + np.diag(-0.5*((g**2)*np.ones_like(f)*h2)[1:],1)\
+                  + np.diag(-0.5*((g**2)*np.ones_like(f)*h2)[:-1],-1)\
+                  + np.diag(-0.5*((g**2)*s*h)[1:],1)\
+                  - np.diag(-0.5*((g**2)*s*h)[:-1],-1)
   return A
 
-def construct_B(dx,dy,dt,m_prev,f,g,df,s,i):
+def construct_B(dx,dt,m_prev,df,i):
+  h = dt/(2*dx)
   if i == 1:
-    B = m_prev - (df*dt/dx + df*dt/dy) - (f*s*dt/(2*dx) + f*s*dt/(2*dy)) + (0.5*(g**2)*(s**2)*dt)
+    B = m_prev - (df*h)
   else:
-    B = - (df*dt/dx + df*dt/dy) - (f*s*dt/dx + f*s*dt/dy) + (0.5*(g**2)*(s**2)*dt)
+    B = - (df*h)
   return B
 
 def construct_P(M,N):
@@ -61,8 +68,7 @@ def construct_P_block(P, P_block, i):
     P_block = sp.linalg.block_diag(P_block, P)
   return P_block
 
-def gauss_seidel(A, b, x, N):
-  iteration = 10
+def gauss_seidel(A, b, x, N, iteration=3):
   for _ in range(iteration):
     lu = sparse.linalg.splu(sparse.csc_matrix(A))
     I = sparse.identity(N, format='csr')
@@ -72,8 +78,7 @@ def gauss_seidel(A, b, x, N):
     x = sparse.linalg.spsolve((D + L), U.dot(x) + b)
   return x
 
-def jacobi(A, b, x, N):
-  iteration = 10
+def jacobi(A, b, x, N, iteration=3):
   for _ in range(iteration):
     lu = sparse.linalg.splu(sparse.csc_matrix(A))
     diag_A = np.diag(A)
