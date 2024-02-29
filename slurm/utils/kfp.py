@@ -4,38 +4,39 @@ from scipy import sparse
 
 from utils.sparse_solver import sparse_solve
 
-## we construct coefficient matrix and constant matrix
-# def construct_A(dx,dy,dt,g,s,H,W):
-#   A = np.eye(H*W) + (np.eye(H*W)*(g**2)*dt)/(dx**2) + (np.eye(H*W)*(g**2)*dt)/(dy**2)\
-#                   - np.diag((0.5*np.ones(H*W)*(g**2)*dt)[1:],-1)/(dx**2) - np.diag((0.5*np.ones(H*W)*(g**2)*dt)[1:],1)/(dy**2) \
-#                   - np.diag((0.5*np.ones(H*W)*(g**2)*dt)[:-1],1)/(dx**2) - np.diag((0.5*np.ones(H*W)*(g**2)*dt)[:-1],-1)/(dy**2)
-#   return A
+def get_sparse_A_block(dx,dt,g,s,H,W, N):
+  h = dt/(2*dx)
+  h2 = dt/(dx**2)
+  f = np.zeros((H*W))
 
-def get_sparse_A_block(dx,dy,dt,g,s,H,W, N):
-  diag = (np.ones((N - 1, H*W)) * (1 + (g**2)[:, None]*dt[:, None] * (1/dx**2 + 1/(dy**2)))).ravel()
-  
-  diag_off = (-np.ones((N - 1, H*W)) * (g**2)[:, None]*dt[:, None])/(dy**2)
-  diag_off[:-1, -1] = 0
-  diag_off = diag_off.ravel()[:-1]
-  
-  t_diag = -(np.ones((N - 2, H*W))/(dt[1:, None])).ravel()
+  base_diagonal = np.ones((N - 1, H*W)) * (g**2)[:, None] * h2
+  diag = 1 + base_diagonal.ravel()
+  up_diagonal = -0.5 * (base_diagonal + (g**2)[:, None] * h * s)
+  up_diagonal[:-1, -1] = 0
+  up_diagonal = up_diagonal.ravel()[:-1]
 
-  return sparse.diags([diag, diag_off, diag_off, t_diag], [0, 1, -1, -H*W], format="csr")
+  down_diagonal = -0.5 * (base_diagonal - (g**2)[:, None] * h * s)
+  down_diagonal[:-1, -1] = 0
+  down_diagonal = down_diagonal.ravel()[:-1]
 
-def construct_B(dx, dy, dt, m_prev, f, g, s, i):
-  df = np.diff(f, axis=0, prepend=f[0,0]).ravel()
-  f = f.ravel()
-  if i == 0:
-    B = m_prev - (df*dt/dx + df*dt/dy) - (f*s*dt/(2*dx) + f*s*dt/(2*dy)) + (0.5*(g**2)*(s**2)*dt)
+  t_diag = -np.ones(((N - 2) * H*W))
+  return sparse.diags([diag, up_diagonal, down_diagonal, t_diag], [0, 1, -1, -H*W], format="csr")
+
+def construct_B(dx,dt,m_prev,df,i):
+  h = dt/(2*dx)
+  if i == 1:
+    B = m_prev - (df*h)
   else:
-    B = - (df*dt/dx + df*dt/dy) - (f*s*dt/dx + f*s*dt/dy) + (0.5*(g**2)*(s**2)*dt)
+    B = - (df*h)
   return B
 
-def get_B_block(dx, dy, time_, m, sigma_, channel, scores, H, W, N):
-  B_block = np.array([])
-  for i in range(N-1):
-    B_block = np.append(B_block, construct_B(dx, dy, time_[i+1] - time_[i], m[channel][i].ravel(), np.zeros((H, W)), sigma_[i+1], scores[i][channel].ravel(), i))
-  
+def get_B_block(dx, dt, m, channel, H, W, N):
+  B_block = []
+  for i in range(1, N):
+    df = np.zeros((H*W))
+    B = construct_B(dx, dt, m[i-1, channel], df, i)
+    B_block.append(B)
+  B_block = np.concatenate(B_block)
   return B_block
 
 def construct_P(M,N):

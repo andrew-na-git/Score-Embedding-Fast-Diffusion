@@ -53,6 +53,8 @@ def solve_pde(A,b,mode='dense'):
     return sp.linalg.solve(A, b)
   if mode == 'sparse':
     return sparse_solve(A, b)
+  if mode == "sp_solve":
+    return sparse.linalg.spsolve(A, b)
 
 def construct_R_block(R, R_block, i):
   if i == 1:

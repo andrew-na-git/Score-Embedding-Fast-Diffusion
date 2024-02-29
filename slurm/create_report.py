@@ -5,7 +5,7 @@ from pathlib import Path
 from sample.sample import sample
 import pandas as pd
 
-def create_report(model="FDM", model_path="model_fdm.pth", sigma=25, N=10, n_data=1, H=28, W=28, with_cuda = False):
+def create_report(model="FDM", model_path="model_fdm.pth", sigma=2, N=20, n_data=1, H=28, W=28, with_cuda = False):
     today = datetime.now(timezone('EST'))
 
     model_title = model
@@ -16,8 +16,8 @@ def create_report(model="FDM", model_path="model_fdm.pth", sigma=25, N=10, n_dat
     log_df = pd.read_csv("loss.log")
 
     epochs = len(log_df)
-    total_time = f"{round(log_df['time'].sum(), 2)} seconds"
-    median_time_per_epoch = f"{round(log_df['time'].median(), 2)} seconds"
+    total_time = f"{round(log_df['time'][0], 2)} seconds"
+    median_time_per_epoch = f"N/A seconds"
 
     ax = log_df["time"].plot(use_index = True)
     ax.set_ylabel("Time (s)")
@@ -35,7 +35,7 @@ def create_report(model="FDM", model_path="model_fdm.pth", sigma=25, N=10, n_dat
 
     fig.savefig(folder + "/loss.jpeg")
 
-    fig, n_eval = sample(model_path)
+    fig, n_eval = sample(H=H, W=W, N=N, sigma=2)
     fig.savefig(folder + "/sample.jpeg")
 
     class PDF(FPDF):

@@ -27,4 +27,5 @@ class CIFARDataset(Dataset):
     return len(self.data)
   
   def __getitem__(self, idx):
-    return self.transform(self.data[idx]).unsqueeze(0)[0]
+    raw = self.transform(self.data[idx]).unsqueeze(0)[0]
+    return (raw - raw.min())/(raw.max() - raw.min())

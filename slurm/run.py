@@ -9,9 +9,9 @@ import torch
 
 parser = argparse.ArgumentParser(prog="Faster Diffusion with KFP")
 parser.add_argument("--model", default="FDM", choices=["FDM", "MG"])
-parser.add_argument("--sigma", default=25, type=int)
-parser.add_argument("--n-timestep", default=10, type=int)
-parser.add_argument("--epochs", default=60, type=int)
+parser.add_argument("--sigma", default=2, type=int)
+parser.add_argument("--n-timestep", default=20, type=int) 
+parser.add_argument("--epochs", default=5000, type=int)
 
 args = parser.parse_args()
 
