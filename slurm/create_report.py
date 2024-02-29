@@ -27,7 +27,7 @@ def create_report(model="FDM", model_path="model_fdm.pth", sigma=2, N=20, n_data
 
     fig.savefig(folder + "/time.jpeg")
 
-    ax = log_df[[x for x in log_df.columns if x.endswith("loss")]].plot(use_index = True)
+    ax = log_df[[x for x in log_df.columns if x.endswith("loss")]][100:].plot(use_index = True)
     ax.set_ylabel("Loss")
     ax.set_xlabel("Epoch")
     fig = ax.get_figure()
@@ -35,7 +35,7 @@ def create_report(model="FDM", model_path="model_fdm.pth", sigma=2, N=20, n_data
 
     fig.savefig(folder + "/loss.jpeg")
 
-    fig, n_eval = sample(H=H, W=W, N=N, sigma=2)
+    fig, n_eval = sample(H=H, W=W, N=N, sigma=sigma)
     fig.savefig(folder + "/sample.jpeg")
 
     class PDF(FPDF):

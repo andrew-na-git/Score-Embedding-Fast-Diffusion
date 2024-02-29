@@ -5,9 +5,7 @@ sys.path.insert(0, ".")
 import torch
 from scipy import integrate
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation
 import numpy as np
-from tqdm import tqdm
 import threading
 import functools
 from utils.kfp import diffusion_coeff, marginal_prob_std
@@ -24,6 +22,7 @@ def ode_sampler(score_model,
                 atol=error_tolerance,
                 rtol=error_tolerance,
                 device='cpu',
+                input_channels=3,
                 z=None,
                 N= 20,
                 H=28,
@@ -44,13 +43,13 @@ def ode_sampler(score_model,
       otherwise, we start from the given z.
     eps: The smallest time step for numerical stability.
   """
-  t = torch.tensor(np.linspace(1., eps, N))
+  t = torch.tensor(np.linspace(1., eps, N), device=device)
   # Create the latent code
   if z is None:
-    initial_x = torch.randn(batch_size, 1, H, W, device=device) \
+    initial_x = torch.randn(batch_size, input_channels, H, W, device=device) \
       * marginal_prob_std(t)[:, None, None, None]
   else:
-    initial_x = z + torch.randn(batch_size, 1, H, W, device=device) \
+    initial_x = z + torch.randn(batch_size, input_channels, H, W, device=device) \
       * marginal_prob_std(t)[:, None, None, None]
 
   shape = initial_x.shape
@@ -72,20 +71,18 @@ def ode_sampler(score_model,
   # Run the black-box ODE solver.
   res = integrate.solve_ivp(ode_func, (1., eps), initial_x.reshape(-1).cpu().numpy(), rtol=rtol, atol=atol, method='RK45')
   print(f"\nNumber of function evaluations: {res.nfev}")
-  x = [res.y[:, 0].reshape(shape)[0][None]]
-  T = len(res.t)
-  for i in range(N-1):
-    idx = int(i + (T/N))
-    x.append(res.y[:, idx].reshape(shape)[i][None])
-  x.append(res.y[:, -1].reshape(shape)[-1][None])
+  x = []
+  sample_points = np.floor(np.linspace(0, res.y.shape[1] - 1, num=N)).astype(int)
+  for idx, i in enumerate(sample_points):
+    x.append(res.y[:, i].reshape(shape)[idx][None])
   x = np.concatenate(x, axis = 0)
   return x, res.nfev
 
 # function for sampling on a thread
-def diffuse_sample(channel, samples, diffusion_coeff, marginal_prob_std, N, H, W):
+def diffuse_sample(diffusion_coeff, marginal_prob_std, N, H, W):
 
-  model_score = ScoreNet(marginal_prob_std=marginal_prob_std)
-  file = f'model_cifar_thread_{channel}.pth'
+  model_score = ScoreNet(marginal_prob_std=marginal_prob_std).to(device)
+  file = f'model_cifar_thread_all.pth'
   ckpt = torch.load(file)
   model_score.load_state_dict(ckpt)
   model_score.eval();
@@ -98,30 +95,24 @@ def diffuse_sample(channel, samples, diffusion_coeff, marginal_prob_std, N, H, W
                   marginal_prob_std,
                   diffusion_coeff,
                   sample_batch_size,
+                  input_channels=3,
                   N=N,
                   H=H,
-                  W=W)
+                  W=W,
+                  device=device)
 
-  samples.append(output[0])
+  return output
 
 
 
 def sample(n = 5, H=28, W=28, N=20, channels=3, sigma=2):
   #@title Sample each channel on a thread
-  threads = [None] * channels
   samples = []
   marginal_prob_std_fn = functools.partial(marginal_prob_std, sigma=sigma)
   diffusion_coeff_fn = functools.partial(diffusion_coeff, sigma=sigma)
 
-  # diffuse all three channels concurrently
-  for ch in range(channels):
-    threads[ch] = threading.Thread(target=diffuse_sample, args=[ch, samples, diffusion_coeff_fn, marginal_prob_std_fn,N, H, W])
-    threads[ch].start()
-
-  for thread in threads:
-    thread.join()
-
-  samples = np.concatenate(samples, axis = 1)
+  
+  samples, n_iter = diffuse_sample(diffusion_coeff_fn, marginal_prob_std_fn,N, H, W)
 
   def get_frame(i):
     return ((samples[i] - samples[i].min())/(samples[i].max() - samples[i].min())).transpose(1, 2, 0)
@@ -133,4 +124,4 @@ def sample(n = 5, H=28, W=28, N=20, channels=3, sigma=2):
   for idx, col in zip(s, ax):
       col.imshow(get_frame(idx), aspect="auto")
   
-  return fig, 0
+  return fig, n_iter

@@ -1,6 +1,7 @@
 import numpy as np
 import scipy as sp
 from scipy import sparse
+import torch
 
 from utils.sparse_solver import sparse_solve
 
@@ -107,7 +108,7 @@ def marginal_prob_std(t, sigma):
   Returns:
     The standard deviation.
   """
-  return np.sqrt((sigma**(2 * t) - 1.) / 2. / np.log(sigma))
+  return torch.sqrt((sigma**(2 * t) - 1.) / 2. / np.log(sigma))
 
 def diffusion_coeff(t, sigma):
   """Compute the diffusion coefficient of our SDE.

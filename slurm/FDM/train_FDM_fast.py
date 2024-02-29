@@ -1,5 +1,3 @@
-import os
-import threading
 import torch.multiprocessing as multiprocessing
 import time
 import functools
@@ -82,29 +80,29 @@ def loss_fn(model, x, label, diffusion_coeff, marginal_prob_std, dt, N, eps=1e-5
   z = torch.randn_like(x)
   # we perturb the image by the forward SDE conditional distribution
   perturbed_x = x + z * std[:, None, None, None]
-  score = model(perturbed_x, random_t)
+  score = model(perturbed_x.to(device), random_t.to(device)).cpu()
   # loss = torch.mean(torch.sum((score * std[:, None, None, None] - label)**2, dim=(1, 2, 3)) / (2 * diff_std2))
   loss = torch.mean(torch.sum((score * std[:, None, None, None] + z)**2, dim=(1, 2, 3))) # original loss from tutorial
   return loss
 
-def diffuse_train(channel, init_x, epoch, diffusion_coeff, marginal_prob_std, label, dt, N, loss_hist):
+def diffuse_train(init_x, epoch, diffusion_coeff, marginal_prob_std, label, dt, N, loss_hist):
   
-  model_score = ScoreNet(marginal_prob_std=marginal_prob_std)
-  optimizer = Adam(model_score.parameters(), lr=1e-4)
+  model_score = ScoreNet(marginal_prob_std=marginal_prob_std).to(device)
+  optimizer = Adam(model_score.parameters(), lr=1e-3)
   model_score.train();
 
-  scores_label = torch.tensor(label)[:, channel][:, None]
+  scores_label = torch.tensor(label)
   for e in tqdm(range(epoch)):
-    loss = loss_fn(model_score, init_x[:, channel][:, None], scores_label, diffusion_coeff, marginal_prob_std, dt, N)
+    loss = loss_fn(model_score, init_x, scores_label, diffusion_coeff, marginal_prob_std, dt, N)
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
     loss_hist[e] = loss.item()
 
-  print(f'\nloss at channel {channel}: {loss}')
-  file = f'model_cifar_thread_{channel}.pth'
+  print(f'\nloss at all channels: {loss}')
+  file = f'model_cifar_thread_all.pth'
   torch.save(model_score.state_dict(), file)
-  print(f"model for thread {channel} has been saved\n")
+  print(f"model has been saved\n")
 
 def train(dataset, N=10, H=28, W=28, channels=3, epochs=1000, sigma=2):
   print(f"Training using device: {device}")
@@ -126,7 +124,7 @@ def train(dataset, N=10, H=28, W=28, channels=3, epochs=1000, sigma=2):
   res = 1
   e = 0
 
-  while res > 0.005:
+  while res > 1e-5:
     for idx, data in tqdm(enumerate(dataset)):
       
 
@@ -147,22 +145,16 @@ def train(dataset, N=10, H=28, W=28, channels=3, epochs=1000, sigma=2):
 
   scores_label = scores.copy().reshape((-1, channels, H, W))
 
-  processes = [None] * channels
-  losses = [multiprocessing.Array('f', range(epochs))] * channels
+  losses = multiprocessing.Array('f', range(epochs))
   init_x = torch.zeros((N, channels, H, W))
 
   for idx, data in enumerate(dataset):
     for ch in range(channels):
       init_x[:, ch] = data[ch]
 
-    # train all three channels concurrently
-    for ch in range(channels):
-      processes[ch] = multiprocessing.Process(target=diffuse_train, args=[ch, init_x, epochs, diffusion_coeff_fn, marginal_prob_std_fn, scores_label, dt, N, losses[ch]])
-      processes[ch].start()
-
-    for p in processes:
-      p.join()
+    diffuse_train(init_x, epochs, diffusion_coeff_fn, marginal_prob_std_fn, scores_label, dt, N, losses)
+    
 
   end_time = time.time() - start_time
-  log_df = pd.DataFrame(data={"time": [end_time] * epochs, "first_loss": losses[0][:], "second_loss": losses[1][:], "third_loss": losses[2][:]})
+  log_df = pd.DataFrame(data={"time": [end_time] * epochs, "loss": losses[:]})
   log_df.to_csv("loss.log", index_label="epoch")
