@@ -16,7 +16,7 @@ def create_report(model="FDM", model_path="model_fdm.pth", sigma=2, N=20, n_data
     log_df = pd.read_csv("loss.log")
 
     epochs = len(log_df)
-    total_time = f"{round(log_df['time'][0], 2)} seconds"
+    total_time = f"{round(log_df['time'][0]/60, 2)} Minutes"
     median_time_per_epoch = f"N/A seconds"
 
     ax = log_df["time"].plot(use_index = True)

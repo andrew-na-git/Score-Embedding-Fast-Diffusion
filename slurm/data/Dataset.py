@@ -10,7 +10,7 @@ dir_path = os.path.dirname(os.path.realpath(__file__))
 
 class CIFARDataset(Dataset):
   def __init__(self, H, W, n=1):
-    np.random.seed(2)
+    np.random.seed(3)
     
     self.transform = v2.Compose([
       v2.ToImageTensor(),
