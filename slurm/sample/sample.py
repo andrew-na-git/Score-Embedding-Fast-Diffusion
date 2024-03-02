@@ -43,14 +43,12 @@ def ode_sampler(score_model,
       otherwise, we start from the given z.
     eps: The smallest time step for numerical stability.
   """
-  t = torch.tensor(np.linspace(1., eps, N), device=device)
+  t = torch.ones(batch_size, device=device) * eps
   # Create the latent code
   if z is None:
-    initial_x = torch.randn(batch_size, input_channels, H, W, device=device) \
-      * marginal_prob_std(t)[:, None, None, None]
+    initial_x = torch.randn(batch_size, input_channels, H, W, device=device) * marginal_prob_std(t)[:, None, None, None]
   else:
-    initial_x = z + torch.randn(batch_size, input_channels, H, W, device=device) \
-      * marginal_prob_std(t)[:, None, None, None]
+    initial_x = z + torch.randn(batch_size, input_channels, H, W, device=device) * marginal_prob_std(t)[:, None, None, None]
 
   shape = initial_x.shape
 
@@ -58,6 +56,7 @@ def ode_sampler(score_model,
     """A wrapper of the score-based model for use by the ODE solver."""
     sample = torch.tensor(sample, device=device, dtype=torch.float32).reshape(shape)
     time_steps = torch.tensor(time_steps, device=device, dtype=torch.float32).reshape((sample.shape[0], ))
+    time_steps += torch.tensor(list(range(sample.shape[0])), device=device)
     with torch.no_grad():
       score = score_model(sample, time_steps)
     return score.cpu().numpy().reshape((-1,)).astype(np.float64)
@@ -72,14 +71,13 @@ def ode_sampler(score_model,
   res = integrate.solve_ivp(ode_func, (1., eps), initial_x.reshape(-1).cpu().numpy(), rtol=rtol, atol=atol, method='RK45')
   print(f"\nNumber of function evaluations: {res.nfev}")
   x = []
-  sample_points = np.floor(np.linspace(0, res.y.shape[1] - 1, num=N)).astype(int)
-  for idx, i in enumerate(sample_points):
-    x.append(res.y[:, i].reshape(shape)[idx][None])
-  x = np.concatenate(x, axis = 0)
-  return x, res.nfev
+  for i in range(res.y.shape[1]):
+    x.append(res.y[:, i].reshape(shape))
+
+  return np.array(x), res.nfev
 
 # function for sampling on a thread
-def diffuse_sample(diffusion_coeff, marginal_prob_std, N, H, W):
+def diffuse_sample(diffusion_coeff, marginal_prob_std, N, H, W, n_data):
 
   model_score = ScoreNet(marginal_prob_std=marginal_prob_std).to(device)
   file = f'model_cifar_thread_all.pth'
@@ -87,7 +85,7 @@ def diffuse_sample(diffusion_coeff, marginal_prob_std, N, H, W):
   model_score.load_state_dict(ckpt)
   model_score.eval();
 
-  sample_batch_size = N
+  sample_batch_size = n_data
   sampler = ode_sampler
 
   # Generate samples using the specified sampler.
@@ -104,24 +102,28 @@ def diffuse_sample(diffusion_coeff, marginal_prob_std, N, H, W):
   return output
 
 
-
-def sample(n = 5, H=28, W=28, N=20, channels=3, sigma=2):
+def sample(n = 5, H=28, W=28, N=20, channels=3, sigma=2, n_data=1):
   #@title Sample each channel on a thread
   samples = []
   marginal_prob_std_fn = functools.partial(marginal_prob_std, sigma=sigma)
   diffusion_coeff_fn = functools.partial(diffusion_coeff, sigma=sigma)
+  sample_batch_size = min(n_data, 4)
+  samples, n_iter = diffuse_sample(diffusion_coeff_fn, marginal_prob_std_fn,N, H, W, sample_batch_size)
 
-  
-  samples, n_iter = diffuse_sample(diffusion_coeff_fn, marginal_prob_std_fn,N, H, W)
+  def get_frame(i, sample_idx):
+    #    return ((samples[i, sample_idx][:, 1:-1, 1:-1] - samples[i, sample_idx][:, 1:-1, 1:-1].min())/(samples[i, sample_idx][:, 1:-1, 1:-1].max() - samples[i, sample_idx][:, 1:-1, 1:-1].min())).transpose(1, 2, 0)
 
-  def get_frame(i):
-    return ((samples[i] - samples[i].min())/(samples[i].max() - samples[i].min())).transpose(1, 2, 0)
+    return ((samples[i, sample_idx] - samples[i, sample_idx].min())/(samples[i, sample_idx].max() - samples[i, sample_idx].min())).transpose(1, 2, 0)
 
-  
-  fig, ax = plt.subplots(1, n, figsize=(32, 30/n))
+  fig, ax = plt.subplots(sample_batch_size, n, figsize=(32, 30 * sample_batch_size/n))
   s = np.round(np.linspace(0, samples.shape[0] - 1, num=n)).astype(int)
 
-  for idx, col in zip(s, ax):
-      col.imshow(get_frame(idx), aspect="auto")
+  if sample_batch_size == 1:
+    for idx, col in zip(s, ax):
+        col.imshow(get_frame(idx, 0), aspect="auto")
+  else:
+    for sample_number, row in enumerate(ax):
+      for idx, col in zip(s, row):
+        col.imshow(get_frame(idx, sample_number), aspect="auto")
   
   return fig, n_iter

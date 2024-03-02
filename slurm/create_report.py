@@ -35,8 +35,8 @@ def create_report(model="FDM", model_path="model_fdm.pth", sigma=2, N=20, n_data
 
     fig.savefig(folder + "/loss.jpeg")
 
-    fig, n_eval = sample(H=H, W=W, N=N, sigma=sigma)
-    fig.savefig(folder + "/sample.jpeg")
+    fig, n_eval = sample(H=H, W=W, N=N, sigma=sigma, n_data=n_data)
+    fig.savefig(folder + "/sample.jpeg", bbox_inches='tight')
 
     class PDF(FPDF):
         def header(self):
@@ -70,17 +70,11 @@ def create_report(model="FDM", model_path="model_fdm.pth", sigma=2, N=20, n_data
     pdf.cell(20)
     pdf.cell(10, 0, f"Epochs: {epochs}")
     pdf.cell(80)
-    pdf.cell(10, 0, f"Image height: {H}")
+    pdf.cell(10, 0, f"Image dimensions: {W} x {H}")
     pdf.ln(7)
 
     pdf.cell(20)
     pdf.cell(10, 0, f"Total Run Time: {total_time}")
-    pdf.cell(80)
-    pdf.cell(10, 0, f"Image width: {W}")
-    pdf.ln(7)
-
-    pdf.cell(20)
-    pdf.cell(10, 0, f"Median time per epoch: {median_time_per_epoch}")
     pdf.cell(80)
     pdf.cell(10, 0, f"Number of time steps sampled: {N}")
     pdf.ln(7)
@@ -93,17 +87,13 @@ def create_report(model="FDM", model_path="model_fdm.pth", sigma=2, N=20, n_data
 
     pdf.cell(43)
     pdf.set_font('Times', 'B', 14)
-    pdf.cell(95, 10, 'Time')
-    pdf.cell(0, 10, 'Loss')
-    pdf.ln(10)
-    pdf.image(folder + "/time.jpeg", w=95, h=80)
-    pdf.image(folder + "/loss.jpeg", x=107, y=83, w=95, h=80)
+    pdf.ln()
+    pdf.image(folder + "/loss.jpeg", w=50, h=45)
 
-    pdf.ln(10)
     pdf.cell(80)
     pdf.cell(30, 0, f"Sample (Num Function Eval: {n_eval})", align="C")
     pdf.ln(7)
-    pdf.image(folder + "/sample.jpeg",x=-21, w=250, h=45)
+    pdf.image(folder + "/sample.jpeg", w=190, h=35 * min(n_data, 4))
     pdf.output(folder + "/report.pdf", 'F')
     print(f"Report saved to {folder + '/report.pdf'}")
 

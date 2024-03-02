@@ -11,9 +11,9 @@ if __name__ == "__main__":
   torch.multiprocessing.set_start_method('spawn')
   parser = argparse.ArgumentParser(prog="Faster Diffusion with KFP")
   parser.add_argument("--model", default="FDM", choices=["FDM", "MG"])
-  parser.add_argument("--sigma", default=250, type=float)
-  parser.add_argument("--no-train", default=False, type=bool)
-  parser.add_argument("--n-timestep", default=10, type=int) 
+  parser.add_argument("--sigma", default=2, type=float)
+  parser.add_argument("--no-train", action="store_true")
+  parser.add_argument("--n-timestep", default=50, type=int) 
   parser.add_argument("--epochs", default=3000, type=int)
 
   args = parser.parse_args()
