@@ -9,24 +9,23 @@ from scipy.special import logsumexp, softmax, log_softmax
 from sparse_solver import sparse_solve
 
 ## we construct coefficient matrix and constant matrix
-def construct_A(dx,dt,f,g,s,H,W):
-  h = dt/(2*dx)
-  h2 = dt/(dx**2)
-  A = np.eye(H*W) + np.diag((f*h)[1:],1)\
-                  - np.diag((f*h)[:-1],-1)\
-                  - np.diag(-1*(g**2)*np.ones_like(f)*h2)\
-                  + np.diag(-0.5*((g**2)*np.ones_like(f)*h2)[1:],1)\
-                  + np.diag(-0.5*((g**2)*np.ones_like(f)*h2)[:-1],-1)\
-                  + np.diag(-0.5*((g**2)*s*h)[1:],1)\
-                  - np.diag(-0.5*((g**2)*s*h)[:-1],-1)
+def construct_A(dh,dt,f,df,g,s,H,W):
+  h = dt/(2*dh)
+  h2 = dt/(dh**2)
+  a = (df*h) - np.diag(-1.*(g**2)*np.ones((H*W))*h2)
+  b = np.diag(-0.5*((g**2)*np.ones((H*W))*h2)[1:],1) + np.diag(-0.5*((g**2)*s*h)[1:],1)\
+      + np.diag((f*h)[1:],1)
+  c = np.diag(-0.5*((g**2)*np.ones((H*W))*h2)[:-1],-1) - np.diag(-0.5*((g**2)*s*h)[:-1],-1)\
+      - np.diag((f*h)[:-1],-1)
+  A = np.eye(H*W) + a + b + c
+                  
   return A
 
-def construct_B(dx,dt,m_prev,df,i):
-  h = dt/(2*dx)
+def construct_B(m_prev,i, H, W):
   if i == 1:
-    B = m_prev - (df*h)
+    B = m_prev
   else:
-    B = - (df*h)
+    B = np.zeros((H*W))
   return B
 
 def construct_P(M,N):
