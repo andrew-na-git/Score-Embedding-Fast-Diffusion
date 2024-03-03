@@ -191,7 +191,7 @@ class AttnBlock(nn.Module):
 
 
 class Model(nn.Module):
-    def __init__(self, config=None):
+    def __init__(self, H = 32, config=None):
         super().__init__()
         # self.config = config
         # ch, out_ch, ch_mult = config.model.ch, config.model.out_ch, tuple(config.model.ch_mult)
@@ -212,7 +212,7 @@ class Model(nn.Module):
         attn_resolutions = []
         dropout = 0.4
         in_channels = 3
-        resolution = 32
+        resolution = H
         resamp_with_conv = True
         #num_timesteps = config.diffusion.num_diffusion_timesteps
         

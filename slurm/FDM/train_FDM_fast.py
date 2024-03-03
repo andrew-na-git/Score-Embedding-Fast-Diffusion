@@ -16,9 +16,6 @@ import pandas as pd
 
 from utils.kfp import get_B_block, diffusion_coeff, solve_pde, get_sparse_A_block, marginal_prob_std
 from network.network import ScoreNet
-from network.ddim_network import Model
-from network.ddpm.ddpm import DDPM
-from network.openai.unet import UNetModel
 
 torch.manual_seed(2);
 
@@ -65,7 +62,7 @@ def diffuse(x, m, dm, channel, time_, g, scores, dt, H, W, N, kdes):
     
 # do training
 
-def loss_fn(model, x, label, diffusion_coeff, marginal_prob_std, dt, N, idx, eps=1e-5):
+def loss_fn(model, optimizer, x, label, diffusion_coeff, marginal_prob_std, dt, N, idx, eps=1e-5):
   """The loss function for training score-based generative models.
 
   Args:
@@ -85,14 +82,26 @@ def loss_fn(model, x, label, diffusion_coeff, marginal_prob_std, dt, N, idx, eps
   z = torch.randn_like(x)
   # we perturb the image by the forward SDE conditional distribution
   perturbed_x = x + z * std[:, None, None, None]
-  score = model(perturbed_x.to(device), (random_t + idx).to(device)).cpu()
-  # loss = torch.mean(torch.sum((score * std[:, None, None, None] - label)**2, dim=(1, 2, 3)) / (2 * diff_std2))
-  loss = torch.mean(torch.sum((score * std[:, None, None, None] + z)**2, dim=(1, 2, 3))) # original loss from tutorial
-  return loss
+  scores = []
 
-def diffuse_train(init_x, epoch, diffusion_coeff, marginal_prob_std, label, dt, N, loss_hist):
+  batch_size = 50
+  total_loss = 0
+  for i in range(N//batch_size):
+
+    score = model(perturbed_x[i * batch_size:(i+1) * batch_size].to(device), (random_t + idx)[i * batch_size: (i+1) * batch_size].to(device)).cpu()
+  # loss = torch.mean(torch.sum((score * std[:, None, None, None] - label)**2, dim=(1, 2, 3)) / (2 * diff_std2))
+    loss = torch.mean(torch.sum((score * std[i * batch_size:(i+1) * batch_size][:, None, None, None] + z[i * batch_size:(i+1) * batch_size])**2, dim=(1, 2, 3))) # original loss from tutorial
+    optimizer.zero_grad()
+    loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), 1/(N/batch_size))
+    optimizer.step()
+    total_loss += loss.item()
+
+  return total_loss / (N//batch_size)
+
+def diffuse_train(model, init_x, epoch, diffusion_coeff, marginal_prob_std, label, dt, N, loss_hist):
   
-  model_score = UNetModel().to(device)
+  model_score = model.to(device)
   optimizer = Adam(model_score.parameters(), lr=1e-3)
   #scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, threshold=0.001)
   model_score.train();
@@ -101,12 +110,12 @@ def diffuse_train(init_x, epoch, diffusion_coeff, marginal_prob_std, label, dt, 
   for e in tqdm(range(epoch)):
     total_loss = 0
     for i in range(init_x.shape[0]):
-      loss = loss_fn(model_score, init_x[i], scores_label[i], diffusion_coeff, marginal_prob_std, dt, N, i)
-      optimizer.zero_grad()
-      loss.backward()
-      torch.nn.utils.clip_grad_norm_(model_score.parameters(), 1)
-      optimizer.step()
-      total_loss += loss.item()
+      loss = loss_fn(model_score, optimizer, init_x[i], scores_label[i], diffusion_coeff, marginal_prob_std, dt, N, i)
+      # optimizer.zero_grad()
+      # loss.backward()
+      # torch.nn.utils.clip_grad_norm_(model_score.parameters(), 1)
+      # optimizer.step()
+      total_loss += loss#.item()
     loss_hist[e] = total_loss / init_x.shape[0]
 
     #scheduler.step(loss_hist[e])
@@ -117,7 +126,7 @@ def diffuse_train(init_x, epoch, diffusion_coeff, marginal_prob_std, label, dt, 
   torch.save(model_score.state_dict(), file)
   print(f"model has been saved\n")
 
-def train(dataset, N=10, H=28, W=28, channels=3, epochs=1000, sigma=2):
+def train(model, dataset, N=10, H=28, W=28, channels=3, epochs=1000, sigma=2):
   print(f"Training using device: {device}")
 
   dt=1/N
@@ -141,7 +150,7 @@ def train(dataset, N=10, H=28, W=28, channels=3, epochs=1000, sigma=2):
   res = 1
   e = 0
 
-  while res > 1e-6:
+  while res > 1e-10:
     for idx, data in tqdm(enumerate(dataset)):
       # diffuse all three channels
       for ch in range(channels):
@@ -166,7 +175,7 @@ def train(dataset, N=10, H=28, W=28, channels=3, epochs=1000, sigma=2):
   for idx, data in enumerate(dataset):
     init_x[idx] = data
 
-  diffuse_train(init_x, epochs, diffusion_coeff_fn, marginal_prob_std_fn, scores_label, dt, N, losses)
+  diffuse_train(model, init_x, epochs, diffusion_coeff_fn, marginal_prob_std_fn, scores_label, dt, N, losses)
     
 
   end_time = time.time() - start_time

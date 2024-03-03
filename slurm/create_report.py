@@ -5,11 +5,11 @@ from pathlib import Path
 from sample.sample import sample
 import pandas as pd
 
-def create_report(model="FDM", model_path="model_fdm.pth", sigma=2, N=20, n_data=1, H=28, W=28, with_cuda = False):
+def create_report(model, dataset, model_name="FDM", model_path="model_fdm.pth", sigma=2, N=20, n_data=1, H=28, W=28, with_cuda = False):
     today = datetime.now(timezone('EST'))
 
-    model_title = model
-    folder = f"reports/{model}_{today.strftime('%B-%d-%H:%M')}"
+    model_title = model_name
+    folder = f"reports/{model_name}_{today.strftime('%B-%d-%H:%M')}"
 
     Path(folder).mkdir(parents=True, exist_ok=True)
 
@@ -35,7 +35,7 @@ def create_report(model="FDM", model_path="model_fdm.pth", sigma=2, N=20, n_data
 
     fig.savefig(folder + "/loss.jpeg")
 
-    fig, n_eval = sample(H=H, W=W, N=N, sigma=sigma, n_data=n_data)
+    fig, n_eval = sample(model, H=H, W=W, N=N, sigma=sigma, n_data=n_data)
     fig.savefig(folder + "/sample.jpeg", bbox_inches='tight')
 
     class PDF(FPDF):

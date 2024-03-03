@@ -37,7 +37,7 @@ default_initializer = layers.default_init
 
 
 class DDPM(nn.Module):
-  def __init__(self):
+  def __init__(self, H=32):
     super().__init__()
     # https://github.com/yang-song/score_sde_pytorch/blob/main/configs/vp/ddpm/cifar10.py
     # https://github.com/yang-song/score_sde_pytorch/blob/main/configs/default_cifar10_configs.py

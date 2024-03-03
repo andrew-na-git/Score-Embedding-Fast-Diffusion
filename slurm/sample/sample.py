@@ -10,9 +10,6 @@ import threading
 import functools
 from utils.kfp import diffusion_coeff, marginal_prob_std
 from network.network import ScoreNet
-from network.ddim_network import Model
-from network.ddpm.ddpm import DDPM
-from network.openai.unet import UNetModel
 
 
 error_tolerance = 1e-3
@@ -81,9 +78,9 @@ def ode_sampler(score_model,
   return np.array(x), res.nfev
 
 # function for sampling on a thread
-def diffuse_sample(diffusion_coeff, marginal_prob_std, N, H, W, n_data):
+def diffuse_sample(model, diffusion_coeff, marginal_prob_std, N, H, W, n_data):
 
-  model_score = UNetModel().to(device)
+  model_score = model.to(device)
   file = f'model_cifar_thread_all.pth'
   ckpt = torch.load(file)
   model_score.load_state_dict(ckpt)
@@ -106,13 +103,13 @@ def diffuse_sample(diffusion_coeff, marginal_prob_std, N, H, W, n_data):
   return output
 
 
-def sample(n = 5, H=28, W=28, N=20, channels=3, sigma=2, n_data=1):
+def sample(model, n = 5, H=28, W=28, N=20, channels=3, sigma=2, n_data=1):
   #@title Sample each channel on a thread
   samples = []
   marginal_prob_std_fn = functools.partial(marginal_prob_std, sigma=sigma)
   diffusion_coeff_fn = functools.partial(diffusion_coeff, sigma=sigma)
   sample_batch_size = min(n_data, 4)
-  samples, n_iter = diffuse_sample(diffusion_coeff_fn, marginal_prob_std_fn,N, H, W, sample_batch_size)
+  samples, n_iter = diffuse_sample(model, diffusion_coeff_fn, marginal_prob_std_fn,N, H, W, sample_batch_size)
 
   def get_frame(i, sample_idx):
     #    return ((samples[i, sample_idx][:, 1:-1, 1:-1] - samples[i, sample_idx][:, 1:-1, 1:-1].min())/(samples[i, sample_idx][:, 1:-1, 1:-1].max() - samples[i, sample_idx][:, 1:-1, 1:-1].min())).transpose(1, 2, 0)
