@@ -10,8 +10,12 @@ import threading
 import functools
 from utils.kfp import diffusion_coeff, marginal_prob_std
 from network.network import ScoreNet
+from network.ddim_network import Model
+from network.ddpm.ddpm import DDPM
+from network.openai.unet import UNetModel
 
-error_tolerance = 1e-5
+
+error_tolerance = 1e-3
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -46,9 +50,9 @@ def ode_sampler(score_model,
   t = torch.ones(batch_size, device=device) * eps
   # Create the latent code
   if z is None:
-    initial_x = torch.randn(batch_size, input_channels, H, W, device=device) * marginal_prob_std(t)[:, None, None, None]
+    initial_x = torch.randn(batch_size, input_channels, H, W, device=device) #* marginal_prob_std(t)[:, None, None, None]
   else:
-    initial_x = z + torch.randn(batch_size, input_channels, H, W, device=device) * marginal_prob_std(t)[:, None, None, None]
+    initial_x = z + torch.randn(batch_size, input_channels, H, W, device=device) #* marginal_prob_std(t)[:, None, None, None]
 
   shape = initial_x.shape
 
@@ -79,7 +83,7 @@ def ode_sampler(score_model,
 # function for sampling on a thread
 def diffuse_sample(diffusion_coeff, marginal_prob_std, N, H, W, n_data):
 
-  model_score = ScoreNet(marginal_prob_std=marginal_prob_std).to(device)
+  model_score = UNetModel().to(device)
   file = f'model_cifar_thread_all.pth'
   ckpt = torch.load(file)
   model_score.load_state_dict(ckpt)

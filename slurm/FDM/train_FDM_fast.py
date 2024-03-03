@@ -10,12 +10,15 @@ import numpy as np
 from tqdm import tqdm
 
 import torch
-from torch.optim import Adam
+from torch.optim import Adam, SGD
 import scipy.stats as stats
 import pandas as pd
 
 from utils.kfp import get_B_block, diffusion_coeff, solve_pde, get_sparse_A_block, marginal_prob_std
 from network.network import ScoreNet
+from network.ddim_network import Model
+from network.ddpm.ddpm import DDPM
+from network.openai.unet import UNetModel
 
 torch.manual_seed(2);
 
@@ -77,7 +80,7 @@ def loss_fn(model, x, label, diffusion_coeff, marginal_prob_std, dt, N, idx, eps
   # we encode the label into the initial data using the reverse ODE
   diff_std2 = diffusion_coeff(2 * random_t)
   for i in range(1, N):
-    x[i] = x[i-1] - 0.5 * label[i-1] * diff_std2[i-1] * dt
+    x[i] = x[i-1] - 0.5 * label[i] * diff_std2[i] * dt
   std = marginal_prob_std(random_t)
   z = torch.randn_like(x)
   # we perturb the image by the forward SDE conditional distribution
@@ -89,8 +92,9 @@ def loss_fn(model, x, label, diffusion_coeff, marginal_prob_std, dt, N, idx, eps
 
 def diffuse_train(init_x, epoch, diffusion_coeff, marginal_prob_std, label, dt, N, loss_hist):
   
-  model_score = ScoreNet(marginal_prob_std=marginal_prob_std).to(device)
+  model_score = UNetModel().to(device)
   optimizer = Adam(model_score.parameters(), lr=1e-3)
+  #scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, threshold=0.001)
   model_score.train();
 
   scores_label = torch.tensor(label)
@@ -100,12 +104,15 @@ def diffuse_train(init_x, epoch, diffusion_coeff, marginal_prob_std, label, dt, 
       loss = loss_fn(model_score, init_x[i], scores_label[i], diffusion_coeff, marginal_prob_std, dt, N, i)
       optimizer.zero_grad()
       loss.backward()
+      torch.nn.utils.clip_grad_norm_(model_score.parameters(), 1)
       optimizer.step()
       total_loss += loss.item()
-
     loss_hist[e] = total_loss / init_x.shape[0]
 
-  print(f'\nloss at all channels: {loss}')
+    #scheduler.step(loss_hist[e])
+    tqdm.write(f'Epoch {e + 1}/{epoch}, Avg Loss: {loss_hist[e]:.4f}')
+
+  print(f'\nloss at all channels: {loss_hist[-1]}')
   file = f'model_cifar_thread_all.pth'
   torch.save(model_score.state_dict(), file)
   print(f"model has been saved\n")

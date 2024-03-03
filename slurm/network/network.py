@@ -25,7 +25,7 @@ class Dense(nn.Module):
 class ScoreNet(nn.Module):
   """A time-dependent score-based model built upon U-Net architecture."""
 
-  def __init__(self, marginal_prob_std, in_channels = 3, out_channels = 3, channels=[32, 64, 128, 256], embed_dim=256):
+  def __init__(self, marginal_prob_std = None, in_channels = 3, out_channels = 3, channels=[64, 128, 256, 512], embed_dim=256):
     """Initialize a time-dependent score-based network.
 
     Args:

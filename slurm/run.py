@@ -18,8 +18,8 @@ if __name__ == "__main__":
 
   args = parser.parse_args()
 
-  H = 28
-  W = 28
+  H = 32
+  W = 32
   dataset = CIFARDataset(H, W)
   n_data = len(dataset)
   n_channels = dataset.channels

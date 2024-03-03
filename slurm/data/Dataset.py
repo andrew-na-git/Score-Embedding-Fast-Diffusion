@@ -9,7 +9,7 @@ import os
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
 class CIFARDataset(Dataset):
-  def __init__(self, H, W, n=1):
+  def __init__(self, H, W, n=4):
     np.random.seed(2)
     
     self.transform = v2.Compose([
