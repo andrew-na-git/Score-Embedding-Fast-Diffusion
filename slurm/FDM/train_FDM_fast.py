@@ -24,6 +24,7 @@ eps = 1e-6
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
+
 #@title Defining pde diffusion for multi-threading
 def diffuse(x, m, dm, channel, time_, g, scores, dt, H, W, N, kdes):
 
@@ -42,7 +43,7 @@ def diffuse(x, m, dm, channel, time_, g, scores, dt, H, W, N, kdes):
     kde_kernel = stats.gaussian_kde(xy_train)
     kdes[channel] = kde_kernel.logpdf(xy_train)
   m[0, channel] = kdes[channel]
-  dx = 256/H*W
+  dx = 256/(H*W)
   
   sparse_A_block = get_sparse_A_block(dx, dt, g(time_[1:]), scores[1:, channel], H, W, N)
 
@@ -51,9 +52,16 @@ def diffuse(x, m, dm, channel, time_, g, scores, dt, H, W, N, kdes):
   m[1:, channel] = solve_pde(sparse_A_block, B_block, mode='sp_sparse').reshape((-1, H*W))
   img_log_prob = m[:, channel]#.reshape((-1, H, W))
 
+  # dm[:, channel, 1:-1] = (img_log_prob[:, 2:] - img_log_prob[:, :-2])/(2*dh) # (img_log_prob[:, 1:-1, 2:] - img_log_prob[:, 1:-1, :-2])/(2*dy)
+  # dm[:, channel, 0] = (img_log_prob[:, 1] - 0)/(2*dh) #+ (img_log_prob[:, 1:-1, 0] - img_log_prob[:, 1:-1, -1])/dy
+  # dm[:, channel, -1] = (0 - img_log_prob[:, -2])/(2*dh) #+ (img_log_prob[:, 1:-1, -1] - img_log_prob[:, 1:-1, 0])/dy
+
+
   dm[:, channel, 1:-1] = (img_log_prob[:,:-2] - img_log_prob[:,2:])/(2*dx)
   dm[:, channel, 0] = dm[:, channel, 1]
   dm[:, channel, -1] = dm[:, channel, -2]
+  
+  
   # dm[:, channel, 1:-1 , 1:-1] = (img_log_prob[:, 2:, 1:-1] - img_log_prob[:, :-2, 1:-1])/(2*dx) + (img_log_prob[:, 1:-1, 2:] - img_log_prob[:, 1:-1, :-2])/(2*dy)
   # dm[:, channel, 1:-1 , 0] = (img_log_prob[:, 2:, 0] - img_log_prob[:, :-2, 0])/(2*dx) + (img_log_prob[:, 1:-1, 0])/(dy)
   # dm[:, channel, 1:-1 , -1] = (img_log_prob[:, 2:, -1] - img_log_prob[:, :-2, -1])/(2*dx) + (img_log_prob[:, 1:-1, -1])/(dy)
@@ -76,6 +84,7 @@ def loss_fn(model, optimizer, x, label, diffusion_coeff, marginal_prob_std, dt, 
   random_t = torch.tensor(np.sort(np.random.uniform(eps, 1., N)).astype(np.float32))
   # we encode the label into the initial data using the reverse ODE
   diff_std2 = diffusion_coeff(2 * random_t)
+
   for i in range(1, N):
     x[i] = x[i-1] - 0.5 * label[i] * diff_std2[i] * dt
   std = marginal_prob_std(random_t)
@@ -84,7 +93,7 @@ def loss_fn(model, optimizer, x, label, diffusion_coeff, marginal_prob_std, dt, 
   perturbed_x = x + z * std[:, None, None, None]
   scores = []
 
-  batch_size = 50
+  batch_size = N
   total_loss = 0
   for i in range(N//batch_size):
 
@@ -102,7 +111,7 @@ def loss_fn(model, optimizer, x, label, diffusion_coeff, marginal_prob_std, dt, 
 def diffuse_train(model, init_x, epoch, diffusion_coeff, marginal_prob_std, label, dt, N, loss_hist):
   
   model_score = model.to(device)
-  optimizer = Adam(model_score.parameters(), lr=1e-3)
+  optimizer = Adam(model_score.parameters(), lr=1e-4)
   #scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, threshold=0.001)
   model_score.train();
 
@@ -120,6 +129,9 @@ def diffuse_train(model, init_x, epoch, diffusion_coeff, marginal_prob_std, labe
 
     #scheduler.step(loss_hist[e])
     tqdm.write(f'Epoch {e + 1}/{epoch}, Avg Loss: {loss_hist[e]:.4f}')
+    # if loss_hist[e] < 40:
+    #   print("Early stopping")
+    #   break
 
   print(f'\nloss at all channels: {loss_hist[-1]}')
   file = f'model_cifar_thread_all.pth'
@@ -147,11 +159,13 @@ def train(model, dataset, N=10, H=28, W=28, channels=3, epochs=1000, sigma=2):
   time_multiple = np.linspace([i + eps for i in range(n_data)], [i + 1 for i in range(n_data)], N, axis=1).astype(np.float32)
 
   # create training data
-  res = 1
+  res = [1] * n_data
   e = 0
-
-  while res > 1e-10:
+  tol = 1e-5
+  while min(res) > tol:
     for idx, data in tqdm(enumerate(dataset)):
+      if res[idx] <= tol:
+        continue
       # diffuse all three channels
       for ch in range(channels):
         diffuse(data, m[idx], dm[idx], ch, time_, diffusion_coeff_fn, scores[idx], dt, H, W, N, kdes[idx])
@@ -162,10 +176,10 @@ def train(model, dataset, N=10, H=28, W=28, channels=3, epochs=1000, sigma=2):
         print(f'No convergence')
         exit(1)
 
-      res = np.linalg.norm(m[idx] - m_prev[idx])#/np.linalg.norm(m_prev[idx])
-
+      res[idx] = np.linalg.norm(m[idx] - m_prev[idx])/np.linalg.norm(m_prev[idx])
+      print(f'residual at iteration {e} for data {idx}: {res[idx]}', flush=True)
       m_prev[idx] = m[idx].copy()
-      e += 1
+    e += 1
 
   scores_label = scores.copy().reshape((n_data, -1, channels, H, W))
 

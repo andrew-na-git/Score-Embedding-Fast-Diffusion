@@ -10,7 +10,7 @@ dir_path = os.path.dirname(os.path.realpath(__file__))
 
 class CIFARDataset(Dataset):
   def __init__(self, H, W, n=4):
-    np.random.seed(2)
+    np.random.seed(3)
     
     self.transform = v2.Compose([
       v2.ToImageTensor(),
@@ -21,6 +21,8 @@ class CIFARDataset(Dataset):
     cifar_data = cifar.data[np.array(cifar.targets) == 5]
     
     choices = np.random.choice(np.arange(len(cifar_data)), n, replace=False)
+    choices[-1] += 1
+
     self.data = cifar_data[choices]
     self.channels = 3
   def __len__(self):
@@ -32,7 +34,7 @@ class CIFARDataset(Dataset):
 
 class FlowersDataset(Dataset):
   def __init__(self, H, W, n=1):
-    np.random.seed(2)
+    np.random.seed(37)
     
     self.transform = v2.Compose([
       v2.ToImageTensor(),
@@ -42,6 +44,7 @@ class FlowersDataset(Dataset):
     flowers = Flowers102(dir_path, transform = self.transform, download=True)
     
     choices = np.random.choice(np.arange(len(flowers)), n, replace=False)
+    choices[-1] += 1
     self.data = Subset(flowers, choices)
     self.channels = 3
   def __len__(self):

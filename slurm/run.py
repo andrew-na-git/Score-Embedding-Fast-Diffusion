@@ -7,6 +7,7 @@ from data.Dataset import CIFARDataset, FlowersDataset
 from network.ddim_network import Model as DDIM
 from network.ddpm.ddpm import DDPM
 from network.openai.unet import UNetModel
+from network.network import ScoreNet
 
 import torch
 
@@ -24,7 +25,7 @@ if __name__ == "__main__":
   H = 32
   W = 32
 
-  model = DDIM(H)
+  model = DDIM(H=H)
   dataset = CIFARDataset(H, W, n=3)
   n_data = len(dataset)
   n_channels = dataset.channels
