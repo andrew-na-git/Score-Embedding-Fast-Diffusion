@@ -210,7 +210,7 @@ class Model(nn.Module):
         ch, out_ch, ch_mult = 128, 3, tuple([1, 2, 2, 2])
         num_res_blocks = 2
         attn_resolutions = [16, ]
-        dropout = 0.1
+        dropout = 0.2
         in_channels = 3
         resolution = H
         resamp_with_conv = True

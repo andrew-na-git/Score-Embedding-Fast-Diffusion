@@ -12,3 +12,4 @@ cifar-10-batches-py
 *.log
 reports/
 flowers-102
+hub_activeloop_celeb-a-train

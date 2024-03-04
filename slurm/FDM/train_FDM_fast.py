@@ -161,7 +161,7 @@ def train(model, dataset, N=10, H=28, W=28, channels=3, epochs=1000, sigma=2):
   # create training data
   res = [1] * n_data
   e = 0
-  tol = 1e-5
+  tol = 0.01
   while min(res) > tol:
     for idx, data in tqdm(enumerate(dataset)):
       if res[idx] <= tol:

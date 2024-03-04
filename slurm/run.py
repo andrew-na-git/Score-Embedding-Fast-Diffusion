@@ -26,7 +26,7 @@ if __name__ == "__main__":
   W = 32
 
   model = DDIM(H=H)
-  dataset = CIFARDataset(H, W, n=3)
+  dataset = FlowersDataset(H, W, n=4)
   n_data = len(dataset)
   n_channels = dataset.channels
 
