@@ -6,28 +6,25 @@ import scipy as sp
 from scipy import sparse
 from scipy.special import logsumexp, softmax, log_softmax
 
-from sparse_solver import sparse_solve
+# from sparse_solver import sparse_solve
 
 ## we construct coefficient matrix and constant matrix
-def construct_A(H,W,dt,f,df,g,s):
-  a = (f - 0.5 * g**2 *(s + 1)) * dt
-  b = 2 * g**2 * dt
-  c = (f - 0.5 * g**2 *(s - 1)) * dt
+def construct_A(H,W,dh,dh2,f,df,g,s):
+  a = (f - 0.5 * g**2 *s) * dh + 0.5 * g**2 * dh2
+  b = 2 * g**2 * dh2
+  c = (f - 0.5 * g**2 *s) * dh - 0.5 * g**2 * dh2
 
-  Ddiag  = b * np.eye(H*W)
-  Dupper = np.diag(a[1:] , 1)
-  Dlower = np.diag(c[:-1], -1)
+  Ddiag  = b * sparse.eye(H*W)
+  Dupper = sparse.diags(a[1:] , 1)
+  Dlower = sparse.diags(c[:-1], -1)
   D_block = Ddiag + Dupper + Dlower
-  B_upper_block = np.diag(a[H:], H)
-  C_lower_block = np.diag(c[:-H], -H)
-  A = np.eye(H*W) + D_block + B_upper_block + C_lower_block + 0.5 * np.diag([df]) * dt
-  return A
+  B_upper_block = sparse.diags(a[H:], H)
+  C_lower_block = sparse.diags(c[:-H], -H)
+  A = sparse.eye(H*W) + D_block + B_upper_block + C_lower_block + df * sparse.eye(H*W) * dh
+  return A.toarray()
 
-def construct_B(H, W, m_prev, i):
-  if i == 1:
-    B = m_prev
-  else:
-    B = np.zeros((H*W))
+def construct_B(H, W, m_prev):
+  B = m_prev
   return B
 
 def construct_P(M,N):
@@ -49,11 +46,11 @@ def construct_P(M,N):
 def construct_R(P):
   return 0.25*P.T
 
-def solve_pde(A,b,mode='dense'):
-  if mode == 'dense':
-    return sp.linalg.solve(A, b)
-  if mode == 'sparse':
-    return sparse_solve(A, b)
+# def solve_pde(A,b,mode='dense'):
+#   if mode == 'dense':
+#     return sp.linalg.solve(A, b)
+#   if mode == 'sparse':
+#     return sparse_solve(A, b)
 
 def construct_R_block(R, R_block, i):
   if i == 1:
