@@ -3,6 +3,19 @@ import scipy as sp
 from scipy import sparse
 import torch
 
+def construct_A(H,W,dh,dh2,f,df,g,s):
+  a = (f - 0.5 * g**2 *s) * dh + 0.5 * g**2 * dh2
+  b = 2 * g**2 * dh2
+  c = (f - 0.5 * g**2 *s) * dh - 0.5 * g**2 * dh2
+
+  Ddiag  = b * sparse.eye(H*W, format="csr")
+  Dupper = sparse.diags(a[1:] , 1, format="csr")
+  Dlower = sparse.diags(c[:-1], -1, format="csr")
+  D_block = Ddiag + Dupper + Dlower
+  B_upper_block = sparse.diags(a[H:], H, format="csr")
+  C_lower_block = sparse.diags(c[:-H], -H, format="csr")
+  A = sparse.eye(H*W, format="csr") + D_block + B_upper_block + C_lower_block + df * sparse.eye(H*W, format="csr") * dh
+  return A
 
 def get_sparse_A_block(dx,dt,g,s,H,W, N):
   h = dt/(2*dx)
@@ -22,13 +35,17 @@ def get_sparse_A_block(dx,dt,g,s,H,W, N):
   t_diag = -np.ones(((N - 2) * H*W))
   return sparse.diags([diag, up_diagonal, down_diagonal, t_diag], [0, 1, -1, -H*W], format="csr")
 
-def construct_B(dx,dt,m_prev,df,i):
-  h = dt/(2*dx)
-  if i == 1:
-    B = m_prev - (df*h)
-  else:
-    B = - (df*h)
+
+def construct_B(H, W, m_prev):
+  B = m_prev
   return B
+# def construct_B(dx,dt,m_prev,df,i):
+#   h = dt/(2*dx)
+#   if i == 1:
+#     B = m_prev - (df*h)
+#   else:
+#     B = - (df*h)
+#   return B
 
 def get_B_block(dx, dt, m, channel, H, W, N):
   B_block = []

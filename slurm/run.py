@@ -14,6 +14,8 @@ from pytz import timezone
 import os
 
 import torch
+import numpy as np
+np.random.seed(2)
 torch.manual_seed(2);
 
 if __name__ == "__main__":
@@ -26,15 +28,27 @@ if __name__ == "__main__":
   parser.add_argument("--epochs", default=500, type=int)
   parser.add_argument("--comparison", action="store_true")
   parser.add_argument("--use-folder")
-
+  parser.add_argument("--dataset", default="cifar", choices=["celeb", "cifar"])
+  parser.add_argument("--res", default=32, type=int)
+  parser.add_argument("--n", default=3, type=int)
+  parser.add_argument("--seed", default=0, type=int)
+  parser.add_argument("--time-btw-samples", default=30, type=int)
+  parser.add_argument("--folder-name")
+  parser.add_argument("--step-size", default=1, type=float)
   args = parser.parse_args()
-  n = 1
-  seed = 9
-  H = 32
-  W = 32
-  tol = 1e-3
-  dx_num = 128
-  temb_method = "fourier" # "fourier"
+
+  n = args.n
+  seed = args.seed
+  H = W = args.res
+  tol = 1e-5
+  dx_num = args.step_size
+  
+  if args.dataset =="celeb":
+    dataset = CelebDataset(H, W, n=n)
+  elif args.dataset == "cifar":
+    dataset = CIFARDataset(H, W, n=n, seed=seed)
+
+  temb_method = "fourier" if n == 1 else "linear"
 
   if args.model == "DDIM":
     model = DDIM(H=H)
@@ -42,23 +56,28 @@ if __name__ == "__main__":
     model = DDPM(H=H, time_embedding_method=temb_method)
   elif args.mode == "OPENAI":
     model = UNetModel()
-  dataset = CIFARDataset(H, W, n=n, seed=seed)
   n_data = len(dataset)
   n_channels = dataset.channels
+
 
   
   if not args.no_train:
     today = datetime.now(timezone('EST'))
 
-    folder = os.path.join(os.path.dirname(__file__), f"reports/{args.model}_{today.strftime('%B-%d-%H:%M')}")
+    if not args.folder_name:
+      folder = os.path.join(os.path.dirname(__file__), f"reports/{args.model}_{today.strftime('%B-%d-%H:%M')}")
+    else:
+      folder = os.path.join(os.path.dirname(__file__), f"reports/{args.model}_{today.strftime('%B-%d-%H:%M')}_{args.folder_name}")
     Path(folder).mkdir(parents=True, exist_ok=True)
 
     model_save_dir = os.path.join(folder, "models")
+    
     Path(model_save_dir).mkdir(parents=True, exist_ok=True)
+    np.save(os.path.join(model_save_dir, "data.npy"), dataset.data)
 
     print("Begin training...")
-    diffusion_time, training_time = train_fdm(model, dataset, args.n_timestep, H, W, n_channels, args.epochs, args.sigma, comparison=args.comparison, model_save_folder=model_save_dir, tol=tol, dx_num=dx_num)
+    diffusion_time, training_time = train_fdm(model, dataset, args.n_timestep, H, W, n_channels, args.epochs, args.sigma, comparison=args.comparison, model_save_folder=model_save_dir, tol=tol, dx_num=dx_num, temb_method=temb_method, time_between_samples=args.time_btw_samples)
     print("Training finished. ")
   print("Generating report...")
-  create_report(model, dataset, args.use_folder if args.use_folder else folder, args.model, os.path.join(args.use_folder if args.use_folder else  folder, f"models/model_final.pth"), args.sigma, args.n_timestep, n_data, H, W, torch.cuda.is_available())
+  create_report(model, dataset, args.use_folder if args.use_folder else folder, args.model, os.path.join(args.use_folder if args.use_folder else  folder, f"models/model_final.pth"), args.sigma, args.n_timestep, n_data, H, W, torch.cuda.is_available(), temb_method)
   print("Done")

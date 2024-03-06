@@ -28,7 +28,8 @@ def ode_sampler(score_model,
                 N= 20,
                 H=28,
                 W=28,
-                eps=1e-3):
+                eps=1e-3, 
+                temb_method="linear"):
   """Generate samples from score-based models with black-box ODE solvers.
 
   Args:
@@ -57,7 +58,10 @@ def ode_sampler(score_model,
     """A wrapper of the score-based model for use by the ODE solver."""
     sample = torch.tensor(sample, device=device, dtype=torch.float32).reshape(shape)
     time_steps = torch.tensor(time_steps, device=device, dtype=torch.float32).reshape((sample.shape[0], ))
-    time_steps += torch.tensor(list(range(sample.shape[0])), device=device) * 2
+    if temb_method == "linear":
+      time_steps += torch.tensor(list(range(sample.shape[0])), device=device) * 2 - batch_size + 0.5
+    else:
+      time_steps += torch.tensor(list(range(sample.shape[0])), device=device) #- batch_size + 0.5
     with torch.no_grad():
       score = score_model(sample, time_steps)
     return score.cpu().numpy().reshape((-1,)).astype(np.float64)
@@ -101,7 +105,7 @@ def diffuse_sample(model, diffusion_coeff, marginal_prob_std, N, H, W, n_data):
 def get_sample_tensors(model, H, W, N, channels, sigma, n_data):
   marginal_prob_std_fn = functools.partial(marginal_prob_std, sigma=sigma)
   diffusion_coeff_fn = functools.partial(diffusion_coeff, sigma=sigma)
-  sample_batch_size = min(n_data, 4)
+  sample_batch_size = n_data
   samples, n_iter = diffuse_sample(model, diffusion_coeff_fn, marginal_prob_std_fn,N, H, W, sample_batch_size)
 
   return samples, n_iter
@@ -126,7 +130,7 @@ def plot_sample(samples, n):
   
   return fig
 
-def sample(model, n = 10, H=28, W=28, N=20, channels=3, sigma=2, n_data=1):
+def sample(model, n = 10, H=28, W=28, N=20, channels=3, sigma=2, n_data=1, temb_method="linear"):
   #@title Sample each channel on a thread
   samples, n_iter = get_sample_tensors(model, H, W, N, channels, sigma, n_data)
 
