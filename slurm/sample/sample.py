@@ -57,7 +57,7 @@ def ode_sampler(score_model,
     """A wrapper of the score-based model for use by the ODE solver."""
     sample = torch.tensor(sample, device=device, dtype=torch.float32).reshape(shape)
     time_steps = torch.tensor(time_steps, device=device, dtype=torch.float32).reshape((sample.shape[0], ))
-    time_steps += torch.tensor(list(range(sample.shape[0])), device=device)
+    time_steps += torch.tensor(list(range(sample.shape[0])), device=device) * 2
     with torch.no_grad():
       score = score_model(sample, time_steps)
     return score.cpu().numpy().reshape((-1,)).astype(np.float64)
@@ -81,10 +81,6 @@ def ode_sampler(score_model,
 def diffuse_sample(model, diffusion_coeff, marginal_prob_std, N, H, W, n_data):
 
   model_score = model.to(device)
-  file = f'model_cifar_thread_all.pth'
-  ckpt = torch.load(file)
-  model_score.load_state_dict(ckpt)
-  model_score.eval();
 
   sample_batch_size = n_data
   sampler = ode_sampler
@@ -102,15 +98,16 @@ def diffuse_sample(model, diffusion_coeff, marginal_prob_std, N, H, W, n_data):
 
   return output
 
-
-def sample(model, n = 5, H=28, W=28, N=20, channels=3, sigma=2, n_data=1):
-  #@title Sample each channel on a thread
-  samples = []
+def get_sample_tensors(model, H, W, N, channels, sigma, n_data):
   marginal_prob_std_fn = functools.partial(marginal_prob_std, sigma=sigma)
   diffusion_coeff_fn = functools.partial(diffusion_coeff, sigma=sigma)
   sample_batch_size = min(n_data, 4)
   samples, n_iter = diffuse_sample(model, diffusion_coeff_fn, marginal_prob_std_fn,N, H, W, sample_batch_size)
 
+  return samples, n_iter
+
+def plot_sample(samples, n):
+  sample_batch_size = samples.shape[1]
   def get_frame(i, sample_idx):
     #    return ((samples[i, sample_idx][:, 1:-1, 1:-1] - samples[i, sample_idx][:, 1:-1, 1:-1].min())/(samples[i, sample_idx][:, 1:-1, 1:-1].max() - samples[i, sample_idx][:, 1:-1, 1:-1].min())).transpose(1, 2, 0)
 
@@ -127,4 +124,12 @@ def sample(model, n = 5, H=28, W=28, N=20, channels=3, sigma=2, n_data=1):
       for idx, col in zip(s, row):
         col.imshow(get_frame(idx, sample_number), aspect="auto")
   
-  return fig, n_iter
+  return fig
+
+def sample(model, n = 10, H=28, W=28, N=20, channels=3, sigma=2, n_data=1):
+  #@title Sample each channel on a thread
+  samples, n_iter = get_sample_tensors(model, H, W, N, channels, sigma, n_data)
+
+  fig = plot_sample(samples, n)
+
+  return fig, n_iter, samples

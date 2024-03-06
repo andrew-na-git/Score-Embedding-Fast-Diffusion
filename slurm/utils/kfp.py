@@ -3,7 +3,6 @@ import scipy as sp
 from scipy import sparse
 import torch
 
-from utils.sparse_solver import sparse_solve
 
 def get_sparse_A_block(dx,dt,g,s,H,W, N):
   h = dt/(2*dx)
@@ -62,8 +61,6 @@ def construct_R(P):
 def solve_pde(A,b,mode='dense'):
   if mode == 'dense':
     return sp.linalg.solve(A, b)
-  if mode == 'sparse':
-    return sparse_solve(A, b)
   if mode == "sp_sparse":
     return sparse.linalg.spsolve(A, b)
 

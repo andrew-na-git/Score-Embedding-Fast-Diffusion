@@ -37,12 +37,14 @@ default_initializer = layers.default_init
 
 
 class DDPM(nn.Module):
-  def __init__(self, H=32):
+  def __init__(self, H=32, time_embedding_method="linear"):
     super().__init__()
     # https://github.com/yang-song/score_sde_pytorch/blob/main/configs/vp/ddpm/cifar10.py
     # https://github.com/yang-song/score_sde_pytorch/blob/main/configs/default_cifar10_configs.py
     self.act = act = nn.SiLU()
     #self.register_buffer('sigmas', torch.tensor(utils.get_sigmas(config)))
+
+    self.temb_func = layers.get_timestep_embedding_linear if time_embedding_method == "linear" else layers.get_timestep_embedding_fourier
 
     self.nf = nf = 128
     ch_mult = (1, 2, 2, 2)
@@ -51,7 +53,7 @@ class DDPM(nn.Module):
     dropout = 0.1
     resamp_with_conv = True
     self.num_resolutions = num_resolutions = len(ch_mult)
-    image_resolution = 32
+    image_resolution = H
     self.all_resolutions = all_resolutions = [image_resolution // (2 ** i) for i in range(num_resolutions)]
 
     AttnBlock = functools.partial(layers.AttnBlock)
@@ -116,7 +118,7 @@ class DDPM(nn.Module):
     if self.conditional:
       # timestep/scale embedding
       timesteps = labels
-      temb = layers.get_timestep_embedding(timesteps, self.nf)
+      temb = self.temb_func(timesteps, self.nf)
       temb = modules[m_idx](temb)
       m_idx += 1
       temb = modules[m_idx](self.act(temb))

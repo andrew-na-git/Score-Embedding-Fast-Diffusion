@@ -2,6 +2,7 @@ import torch.multiprocessing as multiprocessing
 import time
 import functools
 import time
+import os
 
 import sys
 sys.path.insert(0, ".")
@@ -17,8 +18,6 @@ import pandas as pd
 from utils.kfp import get_B_block, diffusion_coeff, solve_pde, get_sparse_A_block, marginal_prob_std
 from network.network import ScoreNet
 
-torch.manual_seed(2);
-
 # Parameters
 eps = 1e-6
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -26,7 +25,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 #@title Defining pde diffusion for multi-threading
-def diffuse(x, m, dm, channel, time_, g, scores, dt, H, W, N, kdes):
+def diffuse(x, m, dm, channel, time_, g, scores, dt, H, W, N, kdes, dx_num):
 
   y_train = []
   for j in range(H):
@@ -43,7 +42,7 @@ def diffuse(x, m, dm, channel, time_, g, scores, dt, H, W, N, kdes):
     kde_kernel = stats.gaussian_kde(xy_train)
     kdes[channel] = kde_kernel.logpdf(xy_train)
   m[0, channel] = kdes[channel]
-  dx = 256/(H*W)
+  dx = dx_num/(H*W)
   
   sparse_A_block = get_sparse_A_block(dx, dt, g(time_[1:]), scores[1:, channel], H, W, N)
 
@@ -97,7 +96,7 @@ def loss_fn(model, optimizer, x, label, diffusion_coeff, marginal_prob_std, dt, 
   total_loss = 0
   for i in range(N//batch_size):
 
-    score = model(perturbed_x[i * batch_size:(i+1) * batch_size].to(device), (random_t + idx)[i * batch_size: (i+1) * batch_size].to(device)).cpu()
+    score = model(perturbed_x[i * batch_size:(i+1) * batch_size].to(device), (random_t + 2 * idx)[i * batch_size: (i+1) * batch_size].to(device)).cpu()
   # loss = torch.mean(torch.sum((score * std[:, None, None, None] - label)**2, dim=(1, 2, 3)) / (2 * diff_std2))
     loss = torch.mean(torch.sum((score * std[i * batch_size:(i+1) * batch_size][:, None, None, None] + z[i * batch_size:(i+1) * batch_size])**2, dim=(1, 2, 3))) # original loss from tutorial
     optimizer.zero_grad()
@@ -108,18 +107,21 @@ def loss_fn(model, optimizer, x, label, diffusion_coeff, marginal_prob_std, dt, 
 
   return total_loss / (N//batch_size)
 
-def diffuse_train(model, init_x, epoch, diffusion_coeff, marginal_prob_std, label, dt, N, loss_hist):
-  
+def diffuse_train(model, init_x, epoch, diffusion_coeff, marginal_prob_std, label, dt, N, loss_hist, lost_hist_per_image, comparison=False, model_save_folder = None):
+  last_epoch_time = time.time()
   model_score = model.to(device)
-  optimizer = Adam(model_score.parameters(), lr=1e-4)
+  optimizer = Adam(model_score.parameters(), lr=0.0002)
   #scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, threshold=0.001)
   model_score.train();
 
+  cur_running_time = 0
+  last_save_time = 0
   scores_label = torch.tensor(label)
   for e in tqdm(range(epoch)):
     total_loss = 0
     for i in range(init_x.shape[0]):
       loss = loss_fn(model_score, optimizer, init_x[i], scores_label[i], diffusion_coeff, marginal_prob_std, dt, N, i)
+      lost_hist_per_image[i, e] = loss
       # optimizer.zero_grad()
       # loss.backward()
       # torch.nn.utils.clip_grad_norm_(model_score.parameters(), 1)
@@ -133,14 +135,32 @@ def diffuse_train(model, init_x, epoch, diffusion_coeff, marginal_prob_std, labe
     #   print("Early stopping")
     #   break
 
+    cur_running_time += time.time() - last_epoch_time
+    
+    ## time between here is not counted ##
+    if comparison and cur_running_time - last_save_time > 30: # save every 30 seconds
+      print("Saving model checkpoint...", flush=True)
+      torch.save(model_score.state_dict(), os.path.join(model_save_folder, f"checkpoint_{int(cur_running_time)}.pth"))
+      last_save_time = cur_running_time
+    
+    elif comparison and np.mean(loss_hist[e-4:e+1]) < 100 and cur_running_time - last_save_time > 2: # if loss is low, save every 2 seconds
+      print("Saving model checkpoint because of low loss...", flush=True)
+      torch.save(model_score.state_dict(), os.path.join(model_save_folder, f"checkpoint_{int(cur_running_time)}.pth"))
+      last_save_time = cur_running_time
+
+    #####################################
+    last_epoch_time = time.time()
+
   print(f'\nloss at all channels: {loss_hist[-1]}')
-  file = f'model_cifar_thread_all.pth'
+  file = os.path.join(model_save_folder, f'model_final.pth')
   torch.save(model_score.state_dict(), file)
   print(f"model has been saved\n")
 
-def train(model, dataset, N=10, H=28, W=28, channels=3, epochs=1000, sigma=2):
-  print(f"Training using device: {device}")
+  return cur_running_time
 
+def train(model, dataset, N=10, H=28, W=28, channels=3, epochs=1000, sigma=2, comparison=False, model_save_folder = None, tol=1e-3, dx_num=128):
+  print(f"Training using device: {device}")
+  total_train_time = 0
   dt=1/N
 
   n_data = len(dataset)
@@ -161,14 +181,15 @@ def train(model, dataset, N=10, H=28, W=28, channels=3, epochs=1000, sigma=2):
   # create training data
   res = [1] * n_data
   e = 0
-  tol = 0.01
-  while min(res) > tol:
+  convergence_iteration = [1000] * n_data
+  while max(res) > tol and e <= min(convergence_iteration) + 2:
     for idx, data in tqdm(enumerate(dataset)):
       if res[idx] <= tol:
+        convergence_iteration[idx] = e if convergence_iteration[idx] == 1000 else convergence_iteration[idx]
         continue
       # diffuse all three channels
       for ch in range(channels):
-        diffuse(data, m[idx], dm[idx], ch, time_, diffusion_coeff_fn, scores[idx], dt, H, W, N, kdes[idx])
+        diffuse(data, m[idx], dm[idx], ch, time_, diffusion_coeff_fn, scores[idx], dt, H, W, N, kdes[idx], dx_num)
 
       scores[idx] = dm[idx].copy()
 
@@ -180,18 +201,28 @@ def train(model, dataset, N=10, H=28, W=28, channels=3, epochs=1000, sigma=2):
       print(f'residual at iteration {e} for data {idx}: {res[idx]}', flush=True)
       m_prev[idx] = m[idx].copy()
     e += 1
+  
+  diffusion_time = time.time() - start_time
 
   scores_label = scores.copy().reshape((n_data, -1, channels, H, W))
+  
+  print("Saving scores")
+  np.save(os.path.join(os.path.dirname(model_save_folder), "scores.npy"), scores_label.swapaxes(0, 1))
 
-  losses = multiprocessing.Array('f', range(epochs))
+  losses = np.zeros((n_data, epochs))
+  total_loss = np.zeros(epochs)
   init_x = torch.zeros((n_data, N, channels, H, W))
 
   for idx, data in enumerate(dataset):
     init_x[idx] = data
 
-  diffuse_train(model, init_x, epochs, diffusion_coeff_fn, marginal_prob_std_fn, scores_label, dt, N, losses)
-    
+  running_time = diffuse_train(model, init_x, epochs, diffusion_coeff_fn, marginal_prob_std_fn, scores_label, dt, N, total_loss, losses, comparison, model_save_folder)
 
   end_time = time.time() - start_time
-  log_df = pd.DataFrame(data={"time": [end_time] * epochs, "loss": losses[:]})
-  log_df.to_csv("loss.log", index_label="epoch")
+  data={"time": [end_time] * epochs, "loss": total_loss}
+  for i in range(n_data):
+    data[f"loss_{i}"] = losses[i]
+  log_df = pd.DataFrame(data = data)
+  log_df.to_csv(os.path.join(os.path.dirname(model_save_folder), "loss.log"), index_label="epoch")
+
+  return diffusion_time, running_time

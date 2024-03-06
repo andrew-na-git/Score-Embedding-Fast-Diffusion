@@ -11,8 +11,8 @@ import os
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
 class CIFARDataset(Dataset):
-  def __init__(self, H, W, n=3):
-    np.random.seed(10)
+  def __init__(self, H, W, n=3, seed=10):
+    np.random.seed(seed)
     
     self.transform = v2.Compose([
       v2.ToImageTensor(),
