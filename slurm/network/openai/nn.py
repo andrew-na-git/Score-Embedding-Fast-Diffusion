@@ -100,7 +100,7 @@ def normalization(channels):
     return GroupNorm32(32, channels)
 
 
-def timestep_embedding(timesteps, dim, max_period=10000):
+def timestep_embedding_fourier(timesteps, dim, max_period=10000):
     """
     Create sinusoidal timestep embeddings.
 
@@ -119,6 +119,20 @@ def timestep_embedding(timesteps, dim, max_period=10000):
     if dim % 2:
         embedding = th.cat([embedding, th.zeros_like(embedding[:, :1])], dim=-1)
     return embedding
+
+def timestep_embedding_linear(timesteps, dim, max_period=10000):
+    """
+    Create sinusoidal timestep embeddings.
+
+    :param timesteps: a 1-D Tensor of N indices, one per batch element.
+                      These may be fractional.
+    :param dim: the dimension of the output.
+    :param max_period: controls the minimum frequency of the embeddings.
+    :return: an [N x dim] Tensor of positional embeddings.
+    """
+    freqs = th.ones(dim).to(device=timesteps.device) * 30
+    args = timesteps[:, None].float() * freqs[None]
+    return args
 
 
 def checkpoint(func, inputs, params, flag):

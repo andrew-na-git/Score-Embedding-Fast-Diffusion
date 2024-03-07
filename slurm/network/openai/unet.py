@@ -14,7 +14,8 @@ from .nn import (
     avg_pool_nd,
     zero_module,
     normalization,
-    timestep_embedding,
+    timestep_embedding_linear,
+    timestep_embedding_fourier,
     checkpoint,
 )
 
@@ -299,6 +300,8 @@ class UNetModel(nn.Module):
 
     def __init__(
         self,
+        H = 32,
+        time_embedding_method = "linear",
         in_channels=3,
         model_channels=32,
         out_channels=3,
@@ -333,6 +336,7 @@ class UNetModel(nn.Module):
         self.num_heads_upsample = num_heads_upsample
 
         time_embed_dim = model_channels * 4
+        self.temb_func = timestep_embedding_linear if time_embedding_method == "linear" else timestep_embedding_fourier
         self.time_embed = nn.Sequential(
             linear(model_channels, time_embed_dim),
             SiLU(),
@@ -456,7 +460,7 @@ class UNetModel(nn.Module):
         ), "must specify y if and only if the model is class-conditional"
 
         hs = []
-        emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
+        emb = self.time_embed(self.temb_func(timesteps, self.model_channels))
 
         if self.num_classes is not None:
             assert y.shape == (x.shape[0],)
@@ -487,7 +491,7 @@ class UNetModel(nn.Module):
                  - 'up': a list of hidden state tensors from upsampling.
         """
         hs = []
-        emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
+        emb = self.time_embed(self.temb_func(timesteps, self.model_channels))
         if self.num_classes is not None:
             assert y.shape == (x.shape[0],)
             emb = emb + self.label_emb(y)

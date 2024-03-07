@@ -54,7 +54,7 @@ if __name__ == "__main__":
     model = DDIM(H=H)
   elif args.model == "DDPM":
     model = DDPM(H=H, time_embedding_method=temb_method)
-  elif args.mode == "OPENAI":
+  elif args.model == "OPENAI":
     model = UNetModel()
   n_data = len(dataset)
   n_channels = dataset.channels

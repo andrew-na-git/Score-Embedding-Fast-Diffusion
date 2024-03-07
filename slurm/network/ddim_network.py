@@ -3,7 +3,14 @@ import torch
 import torch.nn as nn
 
 
-def get_timestep_embedding(timesteps, embedding_dim):
+def get_timestep_embedding_linear(timesteps, embedding_dim):
+  assert len(timesteps.shape) == 1
+  emb = torch.ones(embedding_dim, requires_grad=False, device=timesteps.device) * 30
+  emb = timesteps.float()[:, None] * emb[None, :]
+  
+  return emb
+
+def get_timestep_embedding_fourier(timesteps, embedding_dim):
     """
     This matches the implementation in Denoising Diffusion Probabilistic Models:
     From Fairseq.
@@ -13,13 +20,11 @@ def get_timestep_embedding(timesteps, embedding_dim):
     """
     assert len(timesteps.shape) == 1
 
-    # half_dim = embedding_dim // 2
-    # emb = math.log(10000) / (half_dim - 1)
-    # emb = torch.exp(torch.arange(half_dim, dtype=torch.float32) * -emb)
-    # emb = emb.to(device=timesteps.device)
-    emb = torch.ones(embedding_dim, requires_grad=False, device=timesteps.device) * 10
-    emb = timesteps.float()[:, None] * emb[None, :]
-    #emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
+    half_dim = embedding_dim // 2
+    emb = math.log(10000) / (half_dim - 1)
+    emb = torch.exp(torch.arange(half_dim, dtype=torch.float32) * -emb)
+    emb = emb.to(device=timesteps.device) * timesteps.float()[:, None]
+    emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
     if embedding_dim % 2 == 1:  # zero pad
         emb = torch.nn.functional.pad(emb, (0, 1, 0, 0))
     return emb
@@ -191,7 +196,7 @@ class AttnBlock(nn.Module):
 
 
 class Model(nn.Module):
-    def __init__(self, H = 32, config=None):
+    def __init__(self, H = 32, time_embedding_method="linear"):
         super().__init__()
         # self.config = config
         # ch, out_ch, ch_mult = config.model.ch, config.model.out_ch, tuple(config.model.ch_mult)
@@ -207,7 +212,7 @@ class Model(nn.Module):
         #    self.logvar = nn.Parameter(torch.zeros(num_timesteps))
         
         #https://github.com/ermongroup/ddim/blob/main/configs/cifar10.yml
-        ch, out_ch, ch_mult = 128, 3, tuple([1, 2, 2, 2])
+        ch, out_ch, ch_mult = 128, 3, tuple([1, 4, 4, 4])
         num_res_blocks = 2
         attn_resolutions = [16, ]
         dropout = 0.2
@@ -216,6 +221,7 @@ class Model(nn.Module):
         resamp_with_conv = True
         #num_timesteps = config.diffusion.num_diffusion_timesteps
         
+        self.temb_func = get_timestep_embedding_linear if time_embedding_method == "linear" else get_timestep_embedding_fourier
         self.ch = ch
         self.temb_ch = self.ch*4
         self.num_resolutions = len(ch_mult)
@@ -313,7 +319,7 @@ class Model(nn.Module):
         assert x.shape[2] == x.shape[3] == self.resolution
 
         # timestep embedding
-        temb = get_timestep_embedding(t, self.ch)
+        temb = self.temb_func(t, self.ch)
         temb = self.temb.dense[0](temb)
         temb = nonlinearity(temb)
         temb = self.temb.dense[1](temb)
