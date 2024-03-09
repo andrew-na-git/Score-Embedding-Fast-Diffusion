@@ -1,7 +1,15 @@
 MNIST
-ckpt.pth
+*.pth
 .DS_Store
 **/__pycache__/
 *.o
 *.out
 *.so
+.venv
+*.gif
+cifar-10-batches-py
+*.gz
+*.log
+reports/
+flowers-102
+hub_activeloop_celeb-a-train
