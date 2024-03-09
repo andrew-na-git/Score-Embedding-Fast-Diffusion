@@ -155,13 +155,25 @@ python run.py --sigma=2 \
     --comparison
 
 #celeb 3
+# python run.py --sigma=2 \
+#     --epochs=1000 \
+#     --n=3 \
+#     --res=64 \
+#     --dataset=celeb \
+#     --time-btw-samples=2 \
+#     --folder-name=celeb3 \
+#     --step-size=1 \
+#     --n-timestep=10 \
+#     --model=OPENAI
+
+# #celeb 128x128
 python run.py --sigma=2 \
-    --epochs=1000 \
-    --n=3 \
-    --res=64 \
+    --epochs=1200 \
+    --n=2 \
+    --res=128 \
     --dataset=celeb \
     --time-btw-samples=2 \
-    --folder-name=celeb3 \
+    --folder-name=celeb128 \
     --step-size=1 \
     --n-timestep=10 \
     --model=DDIM \

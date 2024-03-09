@@ -218,7 +218,7 @@ class Model(nn.Module):
         self.temb_func = get_timestep_embedding_linear if time_embedding_method == "linear" else get_timestep_embedding_fourier
         
         #https://github.com/ermongroup/ddim/blob/main/configs/cifar10.yml
-        ch, out_ch, ch_mult = 128, 3, tuple([1, 2, 2, 2])
+        ch, out_ch, ch_mult = 128, 3, tuple([1, 4, 4, 4])
         num_res_blocks = 2
         attn_resolutions = [16, ]
         dropout = 0.1
@@ -227,6 +227,7 @@ class Model(nn.Module):
         resamp_with_conv = True
         #num_timesteps = config.diffusion.num_diffusion_timesteps
         
+        self.temb_func = get_timestep_embedding_linear if time_embedding_method == "linear" else get_timestep_embedding_fourier
         self.ch = ch
         self.temb_ch = self.ch*4
         self.num_resolutions = len(ch_mult)
