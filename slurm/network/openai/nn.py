@@ -99,8 +99,21 @@ def normalization(channels):
     """
     return GroupNorm32(32, channels)
 
+def timestep_embedding_linear(timesteps, dim,):
+    """
+    Create linear timestep embeddings.
 
-def timestep_embedding(timesteps, dim, max_period=10000):
+    :param timesteps: a 1-D Tensor of N indices, one per batch element.
+                      These may be fractional.
+    :param dim: the dimension of the output.
+    :return: an [N x dim] Tensor of positional embeddings.
+    """
+    freqs = th.ones(dim).to(device=timesteps.device) * 30
+    args = timesteps[:, None].float() * freqs[None]
+    return args
+
+
+def timestep_embedding_fourier(timesteps, dim, max_period=10000):
     """
     Create sinusoidal timestep embeddings.
 

@@ -61,7 +61,7 @@ def ode_sampler(score_model,
     if temb_method == "linear":
       time_steps += torch.tensor(list(range(sample.shape[0])), device=device) * 2 - batch_size + 0.5
     else:
-      time_steps += torch.tensor(list(range(sample.shape[0])), device=device) #- batch_size + 0.5
+     time_steps *= 9
     with torch.no_grad():
       score = score_model(sample, time_steps)
     return score.cpu().numpy().reshape((-1,)).astype(np.float64)

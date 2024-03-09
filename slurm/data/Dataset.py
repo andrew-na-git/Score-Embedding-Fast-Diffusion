@@ -66,7 +66,7 @@ class ImageNetDataset(Dataset):
       v2.Resize((W, H), interpolation=v2.InterpolationMode.BICUBIC, antialias=True)
     ])
     if n == 1:
-      self.data = [self.transform(data[-3])]
+      self.data = [self.transform(data[1])]
     else:
       self.data = [self.transform(img) for img in data[:n]]
     self.channels = 3

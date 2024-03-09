@@ -1,14 +1,15 @@
-import torch.multiprocessing as multiprocessing
 import time
 import functools
 import time
 import os
+import multiprocessing
 
 import sys
 sys.path.insert(0, ".")
 
 import numpy as np
 from tqdm import tqdm
+from sklearn.neighbors import KernelDensity
 
 import torch
 from torch.optim import Adam, SGD
@@ -24,6 +25,11 @@ from network.network import ScoreNet
 eps = 1e-6
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
+print(f"Found {multiprocessing.cpu_count()} cores")
+
+def parrallel_score_samples(kde, samples, thread_count=int(0.875 * multiprocessing.cpu_count())):
+    with multiprocessing.Pool(thread_count) as p:
+        return np.concatenate(p.map(kde.score_samples, np.array_split(samples, thread_count)))
 
 
 #@title Defining pde diffusion for multi-threading
@@ -41,8 +47,12 @@ def diffuse(x, m, dm, channel, time_, g, scores, dt, H, W, N, kdes, dx_num):
   xy_train = np.vstack([x_train, y_train])
 
   if kdes[channel] is None:
-    kde_kernel = stats.gaussian_kde(xy_train)
-    kdes[channel] = kde_kernel.logpdf(xy_train)
+    # kde_kernel = stats.gaussian_kde(xy_train)
+    # kdes[channel] = kde_kernel.logpdf(xy_train)
+
+    kde_kernel = KernelDensity(kernel="linear").fit(xy_train.T)
+    # kdes[channel] = parrallel_score_samples(kde_kernel, xy_train.T)
+    kdes[channel] = kde_kernel.score_samples(xy_train.T)
   m[0, channel] = kdes[channel]
   dh = dx_num
 
@@ -113,7 +123,7 @@ def loss_fn(model, optimizer, x, label, diffusion_coeff, marginal_prob_std, dt, 
     if temb_method == "linear":
         score = model(perturbed_x[i * batch_size:(i+1) * batch_size].to(device), (random_t + idx * 2 - n_data + 0.5)[i * batch_size: (i+1) * batch_size].to(device)).cpu()
     else:
-      score = model(perturbed_x[i * batch_size:(i+1) * batch_size].to(device), (random_t)[i * batch_size: (i+1) * batch_size].to(device)).cpu()
+      score = model(perturbed_x[i * batch_size:(i+1) * batch_size].to(device), (random_t * 9)[i * batch_size: (i+1) * batch_size].to(device)).cpu()
   # loss = torch.mean(torch.sum((score * std[:, None, None, None] - label)**2, dim=(1, 2, 3)) / (2 * diff_std2))
     loss = torch.mean(torch.sum((score * std[i * batch_size:(i+1) * batch_size][:, None, None, None] + z[i * batch_size:(i+1) * batch_size])**2, dim=(1, 2, 3))) # original loss from tutorial
     optimizer.zero_grad()

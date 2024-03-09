@@ -2,7 +2,7 @@ import argparse
 
 from FDM.train_FDM_fast import train as train_fdm
 from create_report import create_report
-from data.Dataset import CIFARDataset, FlowersDataset, CelebDataset
+from data.Dataset import CIFARDataset, FlowersDataset, CelebDataset, ImageNetDataset
 from network.ddim_network import Model as DDIM
 from network.ddpm.ddpm import DDPM
 from network.openai.unet import UNetModel
@@ -28,7 +28,7 @@ if __name__ == "__main__":
   parser.add_argument("--epochs", default=500, type=int)
   parser.add_argument("--comparison", action="store_true")
   parser.add_argument("--use-folder")
-  parser.add_argument("--dataset", default="cifar", choices=["celeb", "cifar"])
+  parser.add_argument("--dataset", default="cifar", choices=["celeb", "cifar", "imagenet"])
   parser.add_argument("--res", default=32, type=int)
   parser.add_argument("--n", default=3, type=int)
   parser.add_argument("--seed", default=0, type=int)
@@ -40,25 +40,29 @@ if __name__ == "__main__":
   n = args.n
   seed = args.seed
   H = W = args.res
-  tol = 1e-5
+  tol = 2e-8
   dx_num = args.step_size
   
   if args.dataset =="celeb":
     dataset = CelebDataset(H, W, n=n)
   elif args.dataset == "cifar":
     dataset = CIFARDataset(H, W, n=n, seed=seed)
+  elif args.dataset == "imagenet":
+    dataset = ImageNetDataset(H, W, n=n, seed=seed)
 
   temb_method = "fourier" if n == 1 else "linear"
 
   if args.model == "DDIM":
-    model = DDIM(H=H)
+    model = DDIM(H=H, time_embedding_method=temb_method)
   elif args.model == "DDPM":
     model = DDPM(H=H, time_embedding_method=temb_method)
-  elif args.mode == "OPENAI":
-    model = UNetModel()
+  elif args.model == "OPENAI":
+    model = UNetModel(time_embedding_method=temb_method)
+    
+  pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+  print(f"Num Parameters: {pytorch_total_params}")
   n_data = len(dataset)
   n_channels = dataset.channels
-
 
   
   if not args.no_train:
