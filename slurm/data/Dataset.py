@@ -11,8 +11,9 @@ import os
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
 class CIFARDataset(Dataset):
-  def __init__(self, H, W, n=3, seed=10):
+  def __init__(self, H, W, n=3, seed=10, repeat=1):
     np.random.seed(seed)
+    self.repeat = repeat
     
     self.transform = v2.Compose([
       v2.ToImageTensor(),
@@ -30,10 +31,10 @@ class CIFARDataset(Dataset):
 
     self.channels = 3
   def __len__(self):
-    return len(self.data)
+    return len(self.data) * self.repeat
   
   def __getitem__(self, idx):
-    return self.data[idx]
+    return self.data[idx % len(self.data)]
 
 class FlowersDataset(Dataset):
   def __init__(self, H, W, n=3):
@@ -58,7 +59,8 @@ class FlowersDataset(Dataset):
     return (raw - raw.min())/(raw.max() - raw.min())
 
 class ImageNetDataset(Dataset):
-  def __init__(self, H, W, n=3, seed=None):
+  def __init__(self, H, W, n=3, seed=None, repeat = 1):
+    self.repeat = repeat
     with open(os.path.join(dir_path, 'imagenet_data.pkl'), 'br') as f:
       data = pickle.load(f)
     self.transform = v2.Compose([
@@ -74,13 +76,14 @@ class ImageNetDataset(Dataset):
     self.data = [(raw - raw.min())/(raw.max() - raw.min()) for raw in self.data]
   
   def __len__(self):
-    return len(self.data)
+    return len(self.data) * self.repeat
   
   def __getitem__(self, idx):
-    return self.data[idx]
+    return self.data[idx % len(self.data)]
   
 class CelebDataset(Dataset):
-  def __init__(self, H, W, n=3, seed=None):
+  def __init__(self, H, W, n=3, seed=None, repeat=1):
+    self.repeat = repeat
     with open(os.path.join(dir_path, 'celeb_data.pkl'), 'br') as f:
       data = pickle.load(f)
     self.transform = v2.Compose([
@@ -96,8 +99,8 @@ class CelebDataset(Dataset):
     self.data = [(raw - raw.min())/(raw.max() - raw.min()) for raw in self.data]
   
   def __len__(self):
-    return len(self.data)
+    return len(self.data) * self.repeat
   
   def __getitem__(self, idx):
-    return self.data[idx]
+    return self.data[idx % len(self.data)]
     

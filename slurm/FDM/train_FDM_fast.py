@@ -114,7 +114,6 @@ def loss_fn(model, optimizer, x, label, diffusion_coeff, marginal_prob_std, dt, 
   z = torch.randn_like(x)
   # we perturb the image by the forward SDE conditional distribution
   perturbed_x = x + z * std[:, None, None, None]
-  scores = []
 
   batch_size = N
   total_loss = 0

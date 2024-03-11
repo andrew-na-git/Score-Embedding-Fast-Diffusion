@@ -1,12 +1,12 @@
 #!/bin/bash
 
 python run.py --sigma=2 \
-    --epochs=300 \
-    --n=5 \
-    --res=64 \
-    --seed=2 \
+    --epochs=1000 \
+    --n=1 \
+    --res=128 \
+    --seed=9 \
     --dataset=imagenet \
-    --folder-name=inet5 \
+    --folder-name=inetamp \
     --step-size=1 \
     --n-timestep=10 \
-    --model=OPENAI
+    --model=DDPM
