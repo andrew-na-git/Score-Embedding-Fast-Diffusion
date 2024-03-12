@@ -75,7 +75,7 @@ def create_report(model, dataset, folder, model_name="FDM", model_path="model_fd
 
     #fig.savefig(folder + "/time.jpeg")
 
-    ax = log_df[[x for x in log_df.columns if "loss" in x]][100:].plot(use_index = True)
+    ax = log_df[[x for x in log_df.columns if "loss" in x]][:].plot(use_index = True)
     ax.set_ylabel("Loss")
     ax.set_xlabel("Epoch")
     fig = ax.get_figure()
@@ -84,6 +84,7 @@ def create_report(model, dataset, folder, model_name="FDM", model_path="model_fd
     fig.savefig(folder + "/loss.jpeg")
 
     fig, n_eval, samples = sample(model, H=H, W=W, N=N, sigma=sigma, n_data=n_data, temb_method=temb_method)
+    np.save(folder + "/final_sample.npy", samples)
     fig.savefig(folder + "/sample.png", bbox_inches='tight')
     mse_loss = [round(m, 3) for m in mse_metric([x.numpy() for x in dataset], samples[-1])]
     ssim_loss = [round(m, 3) for m in ssim_metric([x.numpy() for x in dataset], samples[-1])]

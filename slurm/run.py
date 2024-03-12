@@ -66,12 +66,12 @@ if __name__ == "__main__":
 
   
   if not args.no_train:
-    today = datetime.now(timezone('EST'))
+    today = datetime.now(timezone('EST')).strftime('%B-%d-%H:%M')
 
     if not args.folder_name:
-      folder = os.path.join(os.path.dirname(__file__), f"reports/{args.model}_{today.strftime('%B-%d-%H:%M')}")
+      folder = os.path.join(os.path.dirname(__file__), f"reports/{args.model}_{today}")
     else:
-      folder = os.path.join(os.path.dirname(__file__), f"reports/{args.model}_{today.strftime('%B-%d-%H:%M')}_{args.folder_name}")
+      folder = os.path.join(os.path.dirname(__file__), f"reports/{args.model}_{today}_{args.folder_name}")
     Path(folder).mkdir(parents=True, exist_ok=True)
 
     model_save_dir = os.path.join(folder, "models")

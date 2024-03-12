@@ -45,10 +45,10 @@ def ode_sampler(score_model,
       otherwise, we start from the given z.
     eps: The smallest time step for numerical stability.
   """
-  t = torch.ones(batch_size, device=device) * eps
+  t = torch.ones(batch_size, device=device)
   # Create the latent code
   if z is None:
-    initial_x = torch.randn(batch_size, input_channels, H, W, device=device) #* marginal_prob_std(t)[:, None, None, None]
+    initial_x = torch.randn(batch_size, input_channels, H, W, device=device) # * marginal_prob_std(t)[:, None, None, None]
   else:
     initial_x = z + torch.randn(batch_size, input_channels, H, W, device=device) #* marginal_prob_std(t)[:, None, None, None]
 

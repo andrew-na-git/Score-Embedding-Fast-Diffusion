@@ -34,6 +34,8 @@ class CIFARDataset(Dataset):
     return len(self.data) * self.repeat
   
   def __getitem__(self, idx):
+    if idx >= len(self.data) * self.repeat:
+      raise StopIteration()
     return self.data[idx % len(self.data)]
 
 class FlowersDataset(Dataset):
@@ -102,5 +104,7 @@ class CelebDataset(Dataset):
     return len(self.data) * self.repeat
   
   def __getitem__(self, idx):
+    if idx >= len(self.data) * self.repeat:
+      raise StopIteration()
     return self.data[idx % len(self.data)]
     

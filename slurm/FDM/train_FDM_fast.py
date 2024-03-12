@@ -88,7 +88,7 @@ def diffuse(x, m, dm, channel, time_, g, scores, dt, H, W, N, kdes, dx_num):
     
 # do training
 
-def loss_fn(model, optimizer, x, label, diffusion_coeff, marginal_prob_std, dt, N, idx, n_data, temb_method, eps=1e-5):
+def loss_fn(model, optimizer, x, label, diffusion_coeff, marginal_prob_std, dt, N, idx, n_data, temb_method, epoch, eps=1e-5):
   """The loss function for training score-based generative models.
 
   Args:
@@ -101,7 +101,7 @@ def loss_fn(model, optimizer, x, label, diffusion_coeff, marginal_prob_std, dt, 
   """
   #random_t = torch.tensor(np.sort(np.random.uniform(eps, 1., N)).astype(np.float32))
   
-  random_t_sample = (np.linspace(dt + eps, 1., N, endpoint=False) + (np.random.rand(N) - 0.5) * dt).astype(np.float32)
+  random_t_sample = (np.linspace(eps, 1.-dt/2, N, endpoint=False) + (np.random.rand(N)-eps)*dt/2).astype(np.float32)
   random_t = torch.tensor(random_t_sample)
 
   # we encode the label into the initial data using the reverse ODE
@@ -124,7 +124,8 @@ def loss_fn(model, optimizer, x, label, diffusion_coeff, marginal_prob_std, dt, 
     else:
       score = model(perturbed_x[i * batch_size:(i+1) * batch_size].to(device), (random_t * 9)[i * batch_size: (i+1) * batch_size].to(device)).cpu()
   # loss = torch.mean(torch.sum((score * std[:, None, None, None] - label)**2, dim=(1, 2, 3)) / (2 * diff_std2))
-    loss = torch.mean(torch.sum((score * std[i * batch_size:(i+1) * batch_size][:, None, None, None] + z[i * batch_size:(i+1) * batch_size])**2, dim=(1, 2, 3))) # original loss from tutorial
+    factor = 1/diff_std2
+    loss = torch.mean(factor * torch.sum((score * std[i * batch_size:(i+1) * batch_size][:, None, None, None]+z[i * batch_size:(i+1) * batch_size])**2, dim=(1, 2, 3)))
     optimizer.zero_grad()
     loss.backward()
     torch.nn.utils.clip_grad_norm_(model.parameters(), 1/(N/batch_size))
@@ -146,7 +147,7 @@ def diffuse_train(model, init_x, epoch, diffusion_coeff, marginal_prob_std, labe
   for e in tqdm(range(epoch)):
     total_loss = 0
     for i in range(init_x.shape[0]):
-      loss = loss_fn(model_score, optimizer, init_x[i], scores_label[i], diffusion_coeff, marginal_prob_std, dt, N, i, init_x.shape[0], temb_method)
+      loss = loss_fn(model_score, optimizer, init_x[i], scores_label[i], diffusion_coeff, marginal_prob_std, dt, N, i, init_x.shape[0], temb_method, e)
       lost_hist_per_image[i, e] = loss
       # optimizer.zero_grad()
       # loss.backward()

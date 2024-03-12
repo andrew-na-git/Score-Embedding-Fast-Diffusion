@@ -29,7 +29,7 @@ def train():
     N = 1000 # num timesteps
     beta_min = 4
     beta_max = 4
-    epochs = 1200
+    epochs = 1500
     batch_size = 20
     # height and width of image (change these in the sample function too!)
     H = W = 32
@@ -84,16 +84,10 @@ def train():
     torch.save(state, "model.pth")
 
 
-
-def sample_update(model, x, t, N, discrete_betas, sqrt_1m_alphas_cumprod, T=1):
-    timestep = (t * (N - 1) / T).long()
-    beta = discrete_betas.to(t.device)[timestep]
-    labels = t * (N-1)
-    score = - model(x, labels) / sqrt_1m_alphas_cumprod.to(x.device)[labels.long()][:, None, None, None]
-    x_mean = (x + beta[:, None, None, None] * score) / torch.sqrt(1. - beta)[:, None, None, None]
-    noise = torch.randn_like(x)
-    x = x_mean + torch.sqrt(beta)[:, None, None, None] * noise
-    return x, x_mean
+def compute_alpha(beta, t):
+    betas = torch.cat([torch.zeros(1), beta], dim=0)
+    a = (1 - betas.to(t.device)).cumprod(dim=0).index_select(0, t + 1).view(-1, 1, 1, 1)
+    return a
 
 def sample(model_path):
     print("Sampling...")
@@ -110,11 +104,6 @@ def sample(model_path):
 
     num_channels = 3
     discrete_betas = torch.linspace(beta_min / N, beta_max / N, N)
-    
-    alphas = 1. - discrete_betas
-    alphas_cumprod = torch.cumprod(alphas, dim=0)
-    sqrt_1m_alphas_cumprod = torch.sqrt(1. - alphas_cumprod)
-
     device = "cuda" if torch.cuda.is_available else "cpu"
 
     # restore saved model
@@ -129,24 +118,30 @@ def sample(model_path):
 
     inverse_scaler = lambda x: (x + 1.) / 2
 
-    samples = []
     with torch.no_grad():
         # inital sample
         x = torch.randn((num_samples, num_channels, H, W), device=device)
-        timesteps = torch.linspace(1, 1e-3, N, device=device)
-
-        for i in tqdm(range(N)):
-            t = timesteps[i]
-            vec_t = torch.ones(num_samples, device=t.device) * t
-            x, x_mean = sample_update(model, x, vec_t, N, discrete_betas=discrete_betas, sqrt_1m_alphas_cumprod=sqrt_1m_alphas_cumprod)
-
-            samples.append(torch.clone(x_mean))
-    
-    samples = torch.stack(samples)
+        
+        samples = [x]
+        x0_preds = []
+        seq = list(range(0, N))
+        seq_next = [-1] + list(seq[:-1])
+        for i, j in tqdm(zip(reversed(seq), reversed(seq_next)), total=len(seq)):
+            t = (torch.ones(num_samples) * i).to(x.device)
+            next_t = (torch.ones(num_samples) * j).to(x.device)
+            at = compute_alpha(discrete_betas, t.long())
+            at_next = compute_alpha(discrete_betas, next_t.long())
+            xt = samples[-1].to('cuda')
+            et = model(xt, t)
+            x0_t = (xt - et * (1 - at).sqrt()) / at.sqrt()
+            x0_preds.append(x0_t.to('cpu'))
+            c2 = ((1 - at_next)).sqrt()
+            xt_next = at_next.sqrt() * x0_t + c2 * et
+            samples.append(xt_next.to('cpu'))
 
     # just keep 50 out of 1000 images
     idx = np.linspace(0, len(samples) - 1, num=50).astype(int)
-    return torch.stack([inverse_scaler(samples[i]) for i in idx])
+    return torch.stack([inverse_scaler(samples[i].cpu()) for i in idx])
 
 train()
 
