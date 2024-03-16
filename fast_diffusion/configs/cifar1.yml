@@ -1,0 +1,44 @@
+name: cifar1
+
+data_loader:
+  num_images: 1
+  image_size: 32
+  dataset: cifar
+  seed: 9
+  channels: 3
+
+  batch_size: 10
+
+diffusion:
+  sigma: 4
+  dh: 1
+  num_timesteps: 10
+  solve_tolerance: 2e-8
+
+training:
+  epochs: 250
+  lr: 1e-4
+  grad_clip: 1 # False or int
+  
+  # changes timestep from 0-1 to 0-timestep_multiplier before feeding into network
+  timestep_multiplier: 1000
+
+model:
+  in_channels: 3
+  out_channels: 3
+  ch: 128
+  ch_mult: [1, 2, 2, 2]
+  num_res_blocks: 2
+  attention_resolutions: [16, ]
+  dropout: 0.1
+  resample_with_conv: True
+  embedding_method: fourier
+
+sample:
+  type: unconditional
+
+misc:
+  eps: 1e-3
+
+  # how often to sample SSIM and MSE when using --profile flag (seconds)
+  profile_freq: 2
