@@ -1,0 +1,39 @@
+name: cifar1_ddim
+sample_method: ddim   # ddpm or ddim
+
+data_loader:
+  num_images: 1
+  image_size: 32
+  dataset: cifar
+  seed: 9
+  channels: 3
+
+  batch_size: 20
+
+diffusion:
+  beta_min: 0.004
+  beta_max: 0.004
+  num_timesteps: 1000
+
+training:
+  epochs: 1200
+  lr: 2e-4
+  grad_clip: 1 # False or float
+
+  ema: 0.9999 # False or decay (float)
+  warmup: 5000 # False or adaptive lr
+
+model:
+  in_channels: 3
+  out_channels: 3
+  ch: 128
+  ch_mult: [1, 2, 2, 2]
+  num_res_blocks: 2
+  attention_resolutions: [16, ]
+  dropout: 0.1
+  resample_with_conv: True
+  embedding_method: fourier
+
+misc:
+  # how often to sample SSIM and MSE when using --profile flag (seconds)
+  profile_freq: 10
