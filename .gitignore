@@ -1,7 +1,0 @@
-.DS_Store
-**/__pycache__/
-.venv
-*.gif
-cifar-10-batches-py
-*.gz
-saves/
