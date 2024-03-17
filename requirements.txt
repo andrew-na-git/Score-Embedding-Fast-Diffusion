@@ -1,0 +1,11 @@
+torch
+torchvision
+scikit-learn
+matplotlib
+tqdm
+fpdf
+pyaml
+ipykernel
+notebook
+scikit-image
+pytz
