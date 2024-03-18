@@ -16,14 +16,15 @@ diffusion:
   solve_tolerance: 2e-8
 
 training:
-  epochs: 500
+  epochs: 300
   lr: 1e-4
-  grad_clip: 1 # False or int
+  grad_clip: False # False or int
 
   # changes timestep from 0-1 to 0-timestep_multiplier before feeding into network
-  timestep_multiplier: 1000
+  timestep_multiplier: 1
 
 model:
+  max_positions: 10000 # applys for fourier embedding only
   in_channels: 3
   out_channels: 3
   ch: 128
@@ -32,7 +33,7 @@ model:
   attention_resolutions: [16, ]
   dropout: 0.1
   resample_with_conv: True
-  embedding_method: fourier
+  embedding_method: linear
 
 sample:
   type: unconditional

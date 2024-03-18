@@ -10,20 +10,21 @@ data_loader:
   batch_size: 10
 
 diffusion:
-  sigma: 20
+  sigma: 5
   dh: 1
-  num_timesteps: 20
+  num_timesteps: 10
   solve_tolerance: 2e-8
 
 training:
-  epochs: 700
+  epochs: 750
   lr: 1e-4
-  grad_clip: 1 # False or int
+  grad_clip: False # False or float
 
   # changes timestep from 0-1 to 0-timestep_multiplier before feeding into network
-  timestep_multiplier: 1000
+  timestep_multiplier: 1
 
 model:
+  max_positions: 10000 # applys for fourier embedding only
   in_channels: 3
   out_channels: 3
   ch: 128
@@ -31,8 +32,8 @@ model:
   num_res_blocks: 2
   attention_resolutions: [16, ]
   dropout: 0.1
-  resample_with_conv: True
-  embedding_method: fourier
+  resample_with_conv: False
+  embedding_method: linear
 
 sample:
   type: unconditional
