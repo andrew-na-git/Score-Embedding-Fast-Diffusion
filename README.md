@@ -1,4 +1,4 @@
-# Efficient Denoising using Score Embedding in Score-matching Diffusion Models
+# Efficient Denoising using Score Embedding in Score-based Diffusion Models
 
 by
 Andrew S. Na,
@@ -8,7 +8,7 @@ and Justin W.L. Wan
 
 This paper has been submitted for publication in [BMCV](https://bmvc2024.org/).
 
-This repository is the official implementation of **Efficient Denoising using Score Embedding in Score-matching Diffusion Models**.
+This repository is the official implementation of **Efficient Denoising using Score Embedding in Score-based Diffusion Models**.
 
 The goal of this repo is to provide an implementation and demonstrate the efficiency of our denoising model. We solve the log-density FP equation and embed the resulting scores during training. The general idea is captured in the image below:
 
