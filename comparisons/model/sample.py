@@ -4,7 +4,9 @@ from tqdm import tqdm
 
 device = "cuda" if torch.cuda.is_available else "cpu"
 
-def ddim_sampler(config, model):
+def __ddim_sampler(config, model, x):
+    model.eval()
+
     # match these with what you used during training
     N = config["diffusion"]["num_timesteps"]
     H = W = config["data_loader"]["image_size"]
@@ -20,10 +22,7 @@ def ddim_sampler(config, model):
         betas = torch.cat([torch.zeros(1), beta], dim=0)
         a = (1 - betas.to(t.device)).cumprod(dim=0).index_select(0, t + 1).view(-1, 1, 1, 1)
         return a
-    
-    # inital sample
-    x = torch.randn((num_samples, num_channels, H, W), device=device)
-    
+
     samples = [x.cpu()]
     seq = list(range(0, N))
     seq_next = [-1] + list(seq[:-1])
@@ -41,7 +40,9 @@ def ddim_sampler(config, model):
     
     return [x.numpy() for x in samples]
 
-def ddpm_sampler(config, model):
+def __ddpm_sampler(config, model, x):
+    model.eval()
+    
     N = config["diffusion"]["num_timesteps"]
     H = W = config["data_loader"]["image_size"]
     beta_min = config["diffusion"]["beta_min"]
@@ -56,9 +57,6 @@ def ddpm_sampler(config, model):
     alphas = 1. - discrete_betas
     alphas_cumprod = torch.cumprod(alphas, dim=0)
     sqrt_1m_alphas_cumprod = torch.sqrt(1. - alphas_cumprod)
-
-    # inital sample
-    x = torch.randn((num_samples, num_channels, H, W), device=device)
 
     timesteps = torch.linspace(1, 1e-3, N, device=device)
 
@@ -82,30 +80,44 @@ def ddpm_sampler(config, model):
 
     return samples
 
-def sample(model, config, ema_helper=None, sample_method="ddpm"):    
-    model.eval()
+def __sample_with_init_x(model, init_x, config, ema_helper=None, sample_method="ddpm"):
+  model.eval()
 
-    print(f"Sampling {sample_method}...")
+  print(f"Sampling {sample_method}...")
 
-    # restore saved model
-    if ema_helper:
-        ema_helper.store(model.parameters())
-        ema_helper.copy_to(model.parameters())
+  # restore saved model
+  if ema_helper:
+      ema_helper.store(model.parameters())
+      ema_helper.copy_to(model.parameters())
 
-    with torch.no_grad():
-        if sample_method == "ddim":
-            samples = ddim_sampler(config, model)
-        elif sample_method == "ddpm":
-            samples = ddpm_sampler(config, model)
-        else:
-            raise NotImplementedError()
+  with torch.no_grad():
+      if sample_method == "ddim":
+          samples = __ddim_sampler(config, model, init_x)
+      elif sample_method == "ddpm":
+          samples = __ddpm_sampler(config, model, init_x)
+      else:
+          raise NotImplementedError()
 
-    # just keep 50 out of 1000 steps
-    idx = np.linspace(0, len(samples) - 1, num=50).astype(int)
+  # just keep 50 out of 1000 steps
+  idx = np.linspace(0, len(samples) - 1, num=50).astype(int)
 
-    if ema_helper:
-        ema_helper.restore(model.parameters())
+  if ema_helper:
+      ema_helper.restore(model.parameters())
+      
+  inverse_scaler = lambda x: (x + 1.) / 2
+  return np.stack([inverse_scaler(samples[i]) for i in idx])
 
-        
-    inverse_scaler = lambda x: (x + 1.) / 2
-    return np.stack([inverse_scaler(samples[i]) for i in idx])
+def sample(model, config, ema_helper=None, sample_method="ddpm", ground_truths=None):
+  H = W = config["data_loader"]["image_size"]
+  num_samples = config["data_loader"]["num_images"]
+  num_channels = config["data_loader"]["channels"]
+  
+  if num_samples > 1:
+    # conditional sample
+    conditional_weight = config["sample"]["conditional_weight"]
+    init_x = conditional_weight * ground_truths.to(device) + (1 - conditional_weight) * torch.randn((num_samples, num_channels, H, W), device=device)
+  else:
+    # unconditional
+    init_x = torch.randn((num_samples, num_channels, H, W), device=device)
+    
+  return __sample_with_init_x(model, init_x, config, ema_helper, sample_method)

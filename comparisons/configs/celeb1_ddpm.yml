@@ -1,0 +1,40 @@
+name: celeb1_ddpm
+sample_method: ddpm   # ddpm or ddim
+
+data_loader:
+  num_images: 1
+  image_size: 64
+  dataset: celeb
+  seed: 0
+  channels: 3
+
+  batch_size: 20
+
+diffusion:
+  beta_min: 0.0001
+  beta_max: 0.002
+  num_timesteps: 1000
+
+training:
+  epochs: 1750
+  lr: 2e-4
+  grad_clip: 1 # False or float
+
+  ema: 0.9999 # False or decay (float)
+  warmup: 600 # False or adaptive lr
+
+model:
+  max_positions: 10000
+  in_channels: 3
+  out_channels: 3
+  ch: 128
+  ch_mult: [1, 2, 2, 2]
+  num_res_blocks: 2
+  attention_resolutions: [16, ]
+  dropout: 0.1
+  resample_with_conv: True
+  embedding_method: fourier
+
+misc:
+  # how often to sample SSIM and MSE when using --profile flag (seconds)
+  profile_freq: 30

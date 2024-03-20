@@ -17,7 +17,7 @@ diffusion:
 
 training:
   epochs: 300
-  lr: 1e-4
+  lr: 8e-5
   grad_clip: False # False or int
   
   # changes timestep from 0-1 to 0-timestep_multiplier before feeding into network

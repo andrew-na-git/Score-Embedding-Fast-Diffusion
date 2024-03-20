@@ -37,4 +37,4 @@ model:
 
 misc:
   # how often to sample SSIM and MSE when using --profile flag (seconds)
-  profile_freq: 10
+  profile_freq: 20

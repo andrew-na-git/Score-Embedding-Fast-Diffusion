@@ -10,11 +10,6 @@ from model import train
 from create_report import create_report
 import yaml
 
-import torch
-import numpy as np
-np.random.seed(100)
-torch.manual_seed(100);
-
 prog="DDIM and DDPM implementation for comparison to Fast Score-Based Diffusion"
 
 description="""Authors: Andrew S. Na, William Gao, Mykhailo Briazkalo, Justin W.L. Wan

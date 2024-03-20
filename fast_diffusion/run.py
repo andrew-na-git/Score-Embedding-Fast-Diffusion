@@ -10,9 +10,6 @@ from model import train
 from create_report import create_report
 import yaml
 
-import torch
-import numpy as np
-
 prog="Efficient Denoising using Score Embedding in Score-matching Diffusion Models"
 
 description="""Authors: Andrew S. Na, William Gao, Mykhailo Briazkalo, Justin W.L. Wan

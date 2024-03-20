@@ -37,7 +37,7 @@ def create_batch(x, scores, config, idx):
     perturbed_x.append(x + z * std[:, None, None, None])
 
     if time_embed_method == "linear":
-      t.append(random_t + idx * 2 - n_data + 0.5)
+      t.append(timestep_multiplier * (random_t + idx - n_data/2))
     else:
       t.append(random_t * (timestep_multiplier - 1))
 
@@ -51,7 +51,5 @@ def create_batch(x, scores, config, idx):
   stds = torch.concatenate(stds)
   zs = torch.concatenate(zs)
 
-  #indices = np.linspace(0, len(perturbed_x) - 1, batch_size)
   indices = np.sort(np.random.choice(len(perturbed_x), batch_size, replace=False))
   return perturbed_x[indices], t[indices], diff_stds[indices], stds[indices], zs[indices]
-  #return perturbed_x, t, diff_stds, stds, zs

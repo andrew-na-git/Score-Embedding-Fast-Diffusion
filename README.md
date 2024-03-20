@@ -6,29 +6,25 @@ William Gao,
 Mykhailo Briazkalo,
 and Justin W.L. Wan
 
-This paper has been submitted for publication in *conference_placeholder*.
+This paper has been submitted for publication in [BMCV](https://bmvc2024.org/).
 
-This repository is the official implementation of **Efficient Denoising using Score Embedding in Score-matching Diffusion Models** (TODO link).
+This repository is the official implementation of **Efficient Denoising using Score Embedding in Score-matching Diffusion Models**.
 
+The goal of this repo is to provide an implementation and demonstrate the efficiency of our denoising model. We solve the log-density FP equation and embed the resulting scores during training. The general idea is captured in the image below:
+
+![Score Embedding Pipeline](./pipeline_diffusion_cropped.png)
 
 ## Abstract
 
-It is well known that training a denoising score-based diffusion models requires tens
-of thousands of epochs and a substantial number of image data to train the model.
-In this paper, we propose to increase the efficiency in training score-based diffusion
-models. Our method allows us to decrease the number of epochs needed to train
-the diffusion model. We accomplish this by solving the log-density Fokker-Planck
-Equation numerically to compute the score before training. The pre-computed score
-is embedded into the image to encourage faster training under slice Wasserstein
-distance. Consequently, it also allows us to decrease the number of images we need
-to train the neural network to learn an accurate score. We demonstrate through our
-numerical experiments the improved performance of our proposed method compared
-to the DDPM and DDIM models. Our proposed method achieves a similar quality
-to the standard methods XX times faster.
+It is well known that training a denoising score-based diffusion models requires tens of thousands of epochs and a substantial number of image data to train the model. In this paper, we propose to increase the efficiency in training score-based diffusion models. Our method allows us to decrease the number of epochs needed to train the diffusion model. We accomplish this by solving the log-density Fokker-Planck (FP) Equation numerically to compute the score *before* training. The pre-computed score is embedded into the image to encourage faster training under slice Wasserstein distance. Consequently, it also allows us to decrease the number of images we need to train the neural network to learn an accurate score. We demonstrate through our numerical experiments the improved performance of our proposed method compared to standard score-based diffusion models. Our proposed method achieves a similar quality to the standard method meaningfully faster. 
 
 ## Software implementation
 
 All source code associated with our fast diffusion model is inside `fast_diffusion`. The reimplementation of DDIM and DDPM used for comparisons are inside `comparisons`.
+
+For the DDIM and DDPM models, we copy the implementations from the original authors.
+
+The GitHub repo for the original DDPM implementation can be found [here](https://github.com/yang-song/score_sde_pytorch) and DDIM [here](https://github.com/ermongroup/ddim).
 
 There are also a few Jupyter Notebook `.ipynb` files scattered through the repository to serve as helpful utilities or guides.
 
@@ -39,7 +35,7 @@ We use data from CIFAR, CelebA, and ImageNet datasets. For CelebA and ImageNet d
 You'll need a working Python environment to run the code.
 The recommended way to set up your environment is through `pip`.
 
-We recommend using `pip` virtual environments to manage the project dependencies in
+We also recommend using `pip` virtual environments to manage the project dependencies in
 isolation.
 
 To install the required packages:
@@ -68,6 +64,8 @@ For a full list of options: `python3 run.py --help`
 
 ### Running DDPM or DDIM model for comparison
 
+Running the comparison models is exactly the same as above except now everything is taking place in the `comparison` directory.
+
 First, make sure you have `cd` into the `comparison` directory. Then, to train the model, 
     
     python3 run.py --config <config_file_name>
@@ -84,7 +82,7 @@ For a full list of options: `python3 run.py --help`
 
 ### Profiling MSE and SSIM Losses
 
-It is useful to track the SSIM and MSE values as the model trains. For any command described above, adding the `--profile` flag will do this. If enabled, the model will be sampled at regular intervals during training and the MSE and SSIM over time will appear in the `report.pdf` generated at the end of training.
+It is useful to track the SSIM and MSE values as the model trains. For any command described above, adding the `--profile` flag will do this. If enabled, the model will be sampled at regular intervals during training and the MSE and SSIM over time will appear in the `report.pdf` generated at the end of training. For example:
 
     python3 run.py --config cifar1.yml --profile
 
@@ -95,5 +93,4 @@ use and modify the code, without warranty, so long as you provide attribution
 to the authors. See `LICENSE.md` for the full license text.
 
 The manuscript text is not open source. The authors reserve the rights to the
-article content, which is currently submitted for publication in
-*conference name*.
+article content, which is currently submitted for publication in BMCV.

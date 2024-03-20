@@ -16,7 +16,6 @@ diffusion:
   num_timesteps: 1000
 
 training:
-  max_positions: 10000
   epochs: 1200
   lr: 2e-4
   grad_clip: 1 # False or float
@@ -25,6 +24,7 @@ training:
   warmup: 5000 # False or adaptive lr
 
 model:
+  max_positions: 10000
   in_channels: 3
   out_channels: 3
   ch: 128
