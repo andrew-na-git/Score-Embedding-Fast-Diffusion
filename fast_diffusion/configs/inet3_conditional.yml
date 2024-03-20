@@ -1,9 +1,9 @@
-name: celeb1
+name: inet3_conditional
 
 data_loader:
-  num_images: 1
+  num_images: 3
   image_size: 64
-  dataset: celeb
+  dataset: imagenet
   seed: 0
   channels: 3
 
@@ -13,15 +13,15 @@ diffusion:
   sigma: 2
   dh: 1
   num_timesteps: 10
-  solve_tolerance: 1e-6
+  solve_tolerance: 2e-6
 
 training:
   epochs: 750
   lr: 1e-4
-  grad_clip: False # False or float
+  grad_clip: 1 # False or float
 
   # changes timestep from 0-1 to 0-timestep_multiplier before feeding into network
-  timestep_multiplier: 1
+  timestep_multiplier: 1000
 
 model:
   max_positions: 10000 # applys for fourier embedding only
@@ -33,13 +33,14 @@ model:
   attention_resolutions: [16, ]
   dropout: 0.1
   resample_with_conv: False
-  embedding_method: linear
+  embedding_method: fourier
 
 sample:
-  type: unconditional
+  type: conditional
+  conditional_weight: 0.65
 
 misc:
   eps: 1e-3
 
   # how often to sample SSIM and MSE when using --profile flag (seconds)
-  profile_freq: 5
+  profile_freq: 10

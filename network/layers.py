@@ -59,10 +59,10 @@ def ddpm_conv3x3(in_planes, out_planes, stride=1, bias=True, dilation=1, init_sc
 ###########################################################################
 
 ### linear
-def get_timestep_embedding_linear(timesteps, embedding_dim, max_positions=10000):
+def get_timestep_embedding_linear(timesteps, embedding_dim, max_positions=1):
   assert len(timesteps.shape) == 1  # and timesteps.dtype == tf.int32
 
-  w = torch.ones(embedding_dim, requires_grad=False, device=timesteps.device) * 30
+  w = torch.ones(embedding_dim, requires_grad=False, device=timesteps.device)
   emb = timesteps[:, None] * w[None, :]
   return emb
 

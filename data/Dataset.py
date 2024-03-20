@@ -1,9 +1,10 @@
 import numpy as np
 import os
 import pickle
-from torch.utils.data import Dataset, Subset
-from torchvision.datasets import CIFAR10, Flowers102
+from torch.utils.data import Dataset
+from torchvision.datasets import CIFAR10
 import torchvision
+import torch
 torchvision.disable_beta_transforms_warning()
 from torchvision.transforms import v2
 import matplotlib.pyplot as plt
@@ -36,6 +37,8 @@ class Dataset(ABC):
 
     # normalize to [0, 1]
     self.data = [(raw - raw.min())/(raw.max() - raw.min()) for raw in self.data]
+    
+    self.data = torch.stack(self.data)
 
   @abstractmethod
   def get_raw_data(self):

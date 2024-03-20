@@ -1,7 +1,7 @@
-name: celeb1
+name: celeb3_unconditional
 
 data_loader:
-  num_images: 1
+  num_images: 3
   image_size: 64
   dataset: celeb
   seed: 0
@@ -13,15 +13,15 @@ diffusion:
   sigma: 2
   dh: 1
   num_timesteps: 10
-  solve_tolerance: 1e-6
+  solve_tolerance: 2e-8
 
 training:
   epochs: 750
   lr: 1e-4
-  grad_clip: False # False or float
+  grad_clip: 1 # False or float
 
   # changes timestep from 0-1 to 0-timestep_multiplier before feeding into network
-  timestep_multiplier: 1
+  timestep_multiplier: 4
 
 model:
   max_positions: 10000 # applys for fourier embedding only
@@ -42,4 +42,4 @@ misc:
   eps: 1e-3
 
   # how often to sample SSIM and MSE when using --profile flag (seconds)
-  profile_freq: 5
+  profile_freq: 10

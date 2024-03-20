@@ -9,9 +9,8 @@ class Net(nn.Module):
     # https://github.com/yang-song/score_sde_pytorch/blob/main/configs/vp/ddpm/cifar10.py
     # https://github.com/yang-song/score_sde_pytorch/blob/main/configs/default_cifar10_configs.py
     self.act = act = nn.SiLU()
-    #self.register_buffer('sigmas', torch.tensor(utils.get_sigmas(config)))
 
-    
+    self.max_positions = config["model"]["max_positions"]
     self.temb_func = get_timestep_embedding_linear if config["model"]["embedding_method"] == "linear" else get_timestep_embedding_fourier
     self.nf = nf = config["model"]["ch"]
     ch_mult = config["model"]["ch_mult"]
@@ -85,7 +84,7 @@ class Net(nn.Module):
     if self.conditional:
       # timestep/scale embedding
       timesteps = labels
-      temb = self.temb_func(timesteps, self.nf)
+      temb = self.temb_func(timesteps, self.nf, self.max_positions)
       temb = modules[m_idx](temb)
       m_idx += 1
       temb = modules[m_idx](self.act(temb))

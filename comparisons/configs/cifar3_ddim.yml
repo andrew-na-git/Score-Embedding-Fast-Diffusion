@@ -1,4 +1,5 @@
-name: cifar3
+name: cifar3_ddim
+sample_method: ddim   # ddpm or ddim
 
 data_loader:
   num_images: 3
@@ -7,23 +8,23 @@ data_loader:
   seed: 56
   channels: 3
 
-  batch_size: 10
+  batch_size: 20
 
 diffusion:
-  sigma: 2
-  dh: 1
-  num_timesteps: 10
-  solve_tolerance: 2e-8
+  beta_min: 0.0005
+  beta_max: 0.001
+  num_timesteps: 1000
 
 training:
-  epochs: 500
+  epochs: 1200
   lr: 1e-4
-  grad_clip: 1 # False or int
+  grad_clip: 0.2 # False or float
 
-  # changes timestep from 0-1 to 0-timestep_multiplier before feeding into network
-  timestep_multiplier: 1000
+  ema: 0.9999 # False or decay (float)
+  warmup: 700 # False or adaptive lr
 
 model:
+  max_positions: 10000
   in_channels: 3
   out_channels: 3
   ch: 128
@@ -35,10 +36,8 @@ model:
   embedding_method: fourier
 
 sample:
-  type: unconditional
+  conditional_weight: 0.3
 
 misc:
-  eps: 1e-3
-
   # how often to sample SSIM and MSE when using --profile flag (seconds)
-  profile_freq: 5
+  profile_freq: 20

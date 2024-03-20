@@ -1,0 +1,43 @@
+name: inet3_ddpm
+sample_method: ddpm   # ddpm or ddim
+
+data_loader:
+  num_images: 3
+  image_size: 64
+  dataset: imagenet
+  seed: 0
+  channels: 3
+
+  batch_size: 20
+
+diffusion:
+  beta_min: 0.0001
+  beta_max: 0.008
+  num_timesteps: 1000
+
+training:
+  epochs: 2500
+  lr: 1e-5
+  grad_clip: 0.3 # False or float
+
+  ema: 0.9999 # False or decay (float)
+  warmup: 500 # False or adaptive lr
+
+sample:
+  conditional_weight: 0.3
+
+model:
+  max_positions: 10000
+  in_channels: 3
+  out_channels: 3
+  ch: 128
+  ch_mult: [1, 2, 2, 2]
+  num_res_blocks: 2
+  attention_resolutions: [16, ]
+  dropout: 0.1
+  resample_with_conv: True
+  embedding_method: fourier
+
+misc:
+  # how often to sample SSIM and MSE when using --profile flag (seconds)
+  profile_freq: 20

@@ -14,15 +14,36 @@ from data.metrics import ssim_metric, mse_metric
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
+def get_interpolated_values(values, x, y):
+  # Interpolate the y-values corresponding to the given x-values
+  interpolated_y_values = []
+  for x_val in values:
+      for i in range(len(x) - 1):
+          if x[i] <= x_val <= x[i+1]:
+              # Linear interpolation
+              interpolated_y = y[i] + (y[i+1] - y[i]) * (x_val - x[i]) / (x[i+1] - x[i])
+              interpolated_y_values.append(interpolated_y)
+              break  # Break the loop as soon as the first interpolation point is found
+      else:
+          interpolated_y_values.append(np.nan)  # If x_val is outside the range, mark it as NaN
+
+  return interpolated_y_values
+
 def plot_metrics(metrics):
     losses = metrics["losses"]
-    ssims = metrics["ssim"]
-    mses = metrics["mse"]
+    ssims = [np.mean(x) for x in metrics["ssim"]]
+    mses = [np.mean(x) for x in metrics["mse"]]
     times = metrics["times"]
     epochs = metrics["epochs"]
 
     if len(ssims) > 0 and len(ssims) == len(mses):
         ## run was profiled, plot both
+        # Values to annotate
+        highlight_y_values = [0.99, 0.98, 0.95, 0.90]
+        interpolated_x_values_ssim = get_interpolated_values(highlight_y_values, ssims, times)
+        # interpolated corresponding mse values
+        interpolated_y_values_mse = get_interpolated_values(interpolated_x_values_ssim, times, mses)
+
         fig, axes = plt.subplots(1, 3, figsize=(21, 5.5))
         for i in range(len(losses)):
             axes[0].plot(losses[i], label=f"loss_img_{i}")
@@ -39,6 +60,14 @@ def plot_metrics(metrics):
         ax2_2 = axes[2].twiny()
         ax2_2.plot(epochs, mses, linestyle='None')
         ax2_2.set_xlabel("Epoch")
+
+        # Annotate the important points on ssim
+        for x_val, y_val in zip(interpolated_x_values_ssim, highlight_y_values):
+          axes[1].annotate(f'({x_val:.2f}, {y_val})', (x_val, y_val), textcoords="offset points", xytext=(0,10), ha='center')
+
+        # annotate the important points on mse
+        for x_val, y_val in zip(interpolated_x_values_ssim, interpolated_y_values_mse):
+          axes[2].annotate(f'({x_val:.2f}, {y_val:.4f})', (x_val, y_val), textcoords="offset points", xytext=(0,10), ha='center')
 
         axes[0].set_title("Loss vs Epochs")
         axes[0].legend(loc="upper right")
@@ -98,19 +127,20 @@ def create_report(folder_path):
     fig = plot_metrics(state["metrics"])
 
     fig.savefig(os.path.join(folder_path, "metrics.png"))
-    ground_truths = np.load(os.path.join(folder_path, "dataset.npy"))
+    ground_truths = torch.from_numpy(np.load(os.path.join(folder_path, "dataset.npy")))
 
     if sample_method == "unconditional":
       samples, n_iter = unconditional_sample(model, config)
     else:
-      samples, n_iter = conditional_sample(model, config, ground_truths, 0.5)
+      conditional_weight = config["sample"]["conditional_weight"]
+      samples, n_iter = conditional_sample(model, config, ground_truths, conditional_weight)
     
     np.save(os.path.join(folder_path, "samples.npy"), samples)
 
-    mse = mse_metric(ground_truths, samples[-1])
-    mse = [round(x, 4) for x in mse]
-    ssim = ssim_metric(ground_truths, samples[-1])
-    ssim = [round(x, 4) for x in ssim]
+    mse = mse_metric(ground_truths.numpy(), samples[-1])
+    mse = [np.round(x, 4) for x in mse]
+    ssim = ssim_metric(ground_truths.numpy(), samples[-1])
+    ssim = [np.round(x, 4) for x in ssim]
     
     print("SSIM: ", ssim)
     print("MSE: ", mse)

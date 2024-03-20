@@ -13,17 +13,6 @@ def __ode_sampler(score_model,
                 W=32,
                 temb_method="linear",
                 timestep_multiplier = 1000):
-  """Generate samples from score-based models with black-box ODE solvers.
-
-  Args:
-    score_model: A PyTorch model that represents the time-dependent score-based model.
-    batch_size: The number of samplers to generate by calling this function once.
-    device: 'cuda' for running on GPUs, and 'cpu' for running on CPUs.
-    z: The latent code that governs the final sample. If None, we start from p_1;
-      otherwise, we start from the given z.
-  """
-  # Create the latent code
-  
   atol = rtol = 1e-3
   device = "cuda" if torch.cuda.is_available() else "cpu"
   eps = 1e-3
@@ -31,7 +20,7 @@ def __ode_sampler(score_model,
   if z is None:
     initial_x = torch.randn(batch_size, input_channels, H, W, device=device)
   else:
-    initial_x = torch.tensor(z, device=device) * cond_weight + (1 - cond_weight) * torch.tensor(np.random.normal(scale = sigma, size = (batch_size, input_channels, H, W)), device=device)
+    initial_x = (1 - cond_weight) * torch.tensor(np.random.normal(scale = sigma, size = (batch_size, input_channels, H, W)), device=device) + z.to(device) * cond_weight
 
   shape = initial_x.shape
 
@@ -40,7 +29,7 @@ def __ode_sampler(score_model,
     sample = torch.tensor(sample, device=device, dtype=torch.float32).reshape(shape)
     time_steps = torch.tensor(time_steps, device=device, dtype=torch.float32).reshape((sample.shape[0], ))
     if temb_method == "linear":
-      time_steps += torch.tensor(list(range(sample.shape[0])), device=device) * 2 - batch_size + 0.5
+      time_steps += (torch.tensor(list(range(sample.shape[0])), device=device) - batch_size/2) * timestep_multiplier
     else:
      time_steps *= timestep_multiplier
     with torch.no_grad():
@@ -63,6 +52,8 @@ def __ode_sampler(score_model,
   return np.array(x), res.nfev
 
 def unconditional_sample(model, config):
+  model.eval()
+
   sigma = config["diffusion"]["sigma"]
   batch_size = config["data_loader"]["num_images"]
   channels = config["data_loader"]["channels"]
@@ -76,6 +67,8 @@ def unconditional_sample(model, config):
   return samples[idx], n_eval
 
 def conditional_sample(model, config, dataset, cond_weight = 0.1):
+  model.eval()
+
   sigma = config["diffusion"]["sigma"]
   timestep_multiplier = config["training"]["timestep_multiplier"]
 

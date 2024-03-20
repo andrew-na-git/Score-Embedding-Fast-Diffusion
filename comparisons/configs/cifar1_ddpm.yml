@@ -11,8 +11,8 @@ data_loader:
   batch_size: 20
 
 diffusion:
-  beta_min: 0.004
-  beta_max: 0.004
+  beta_min: 0.0001
+  beta_max: 0.02
   num_timesteps: 1000
 
 training:
@@ -24,6 +24,7 @@ training:
   warmup: 5000 # False or adaptive lr
 
 model:
+  max_positions: 10000
   in_channels: 3
   out_channels: 3
   ch: 128

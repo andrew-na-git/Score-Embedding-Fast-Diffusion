@@ -46,7 +46,7 @@ def train(config, save_folder, profile=False):
     sample_method = config["sample_method"]
 
     dataset = get_dataset(config, repeat=batch_size)
-    np.save(os.path.join(save_folder, "dataset.npy"), dataset)
+    np.save(os.path.join(save_folder, "dataset.npy"), dataset.data)
 
     # if profiling, create sample folder:
     if profile:
@@ -114,15 +114,18 @@ def train(config, save_folder, profile=False):
         ### time between here is not counted ###
         if profile and cur_running_time - last_save_time > config["misc"]["profile_freq"]: # sample every n seconds
             print("Saving sample checkpoint...", flush=True)
-            
-            samples = sample(model, config, ema_helper=ema_helper, sample_method=sample_method)
-            
-            np.save(os.path.join(save_folder, "samples", f"sample_{round(cur_running_time, 2)}.npy"), samples)
-            mses.append(mse_metric([x.numpy() for x in dataset.data], samples[-1]))
-            ssims.append(ssim_metric([x.numpy() for x in dataset.data], samples[-1]))
-            profile_times.append(cur_running_time)
-            profile_epochs.append(e)
-            last_save_time = cur_running_time
+
+            with torch.no_grad():
+                samples = sample(model, config, ema_helper=ema_helper, sample_method=sample_method, ground_truths=dataset.data)
+                
+                np.save(os.path.join(save_folder, "samples", f"sample_{round(cur_running_time, 2)}.npy"), samples)
+                mses.append(mse_metric([x.numpy() for x in dataset.data], samples[-1]))
+                ssims.append(ssim_metric([x.numpy() for x in dataset.data], samples[-1]))
+                print(str(ssims[-1]) + '\n')
+                profile_times.append(cur_running_time)
+                profile_epochs.append(e)
+                model.train()
+                last_save_time = cur_running_time
 
         ########################################
 
@@ -132,7 +135,7 @@ def train(config, save_folder, profile=False):
         # save final sample
         with torch.no_grad():
             print("Saving final sample...", flush=True)
-            samples = sample(model, config, ema_helper=ema_helper, sample_method=sample_method)
+            samples = sample(model, config, ema_helper=ema_helper, sample_method=sample_method, ground_truths=dataset.data)
             
             np.save(os.path.join(save_folder, "samples", f"sample_{round(cur_running_time, 2)}.npy"), samples)           
             mses.append(mse_metric([x.numpy() for x in dataset.data], samples[-1]))
