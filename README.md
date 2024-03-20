@@ -1,4 +1,4 @@
-# Efficient Denoising using Score Embedding in Score-matching Diffusion Models
+# Efficient Denoising using Score Embedding in Score-based Diffusion Models
 
 by
 Andrew S. Na,
