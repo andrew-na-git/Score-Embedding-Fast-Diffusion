@@ -6,7 +6,7 @@ William Gao,
 Mykhailo Briazkalo,
 and Justin W.L. Wan
 
-This paper has been submitted for publication in [BMCV](https://bmvc2024.org/).
+This paper has been submitted for publication in [BMVC](https://bmvc2024.org/).
 
 This repository is the official implementation of **Efficient Denoising using Score Embedding in Score-based Diffusion Models**.
 
@@ -16,7 +16,7 @@ The goal of this repo is to provide an implementation and demonstrate the effici
 
 ## Abstract
 
-It is well known that training a denoising score-based diffusion models requires tens of thousands of epochs and a substantial number of image data to train the model. In this paper, we propose to increase the efficiency in training score-based diffusion models. Our method allows us to decrease the number of epochs needed to train the diffusion model. We accomplish this by solving the log-density Fokker-Planck (FP) Equation numerically to compute the score *before* training. The pre-computed score is embedded into the image to encourage faster training under slice Wasserstein distance. Consequently, it also allows us to decrease the number of images we need to train the neural network to learn an accurate score. We demonstrate through our numerical experiments the improved performance of our proposed method compared to standard score-based diffusion models. Our proposed method achieves a similar quality to the standard method meaningfully faster. 
+It is well known that training a denoising score-based diffusion model requires tens of thousands of epochs and a substantial number of image data to train the model. In this paper, we propose to increase the efficiency of training score-based diffusion models. Our method allows us to decrease the number of epochs needed to train the diffusion model. We accomplish this by solving the log-density Fokker-Planck (FP) Equation numerically to compute the score *before* training. The pre-computed score is embedded into the image to encourage faster training under slice Wasserstein distance. We demonstrate through our numerical experiments the improved performance of our proposed method compared to standard score-based diffusion models. Our proposed method achieves a similar quality to the standard method meaningfully faster.  
 
 ## Software implementation
 
@@ -52,7 +52,7 @@ First, make sure you have `cd` into the `fast_diffusion` directory. Then, to tra
     
     python3 run.py --config <config_file_name>
 
-To make a sample and regenerate a report on an already pretrained model:
+To make a sample and regenerate a report on an already pre-trained model:
 
     python3 run.py --config <config_file_name> --no-train
 
@@ -64,13 +64,13 @@ For a full list of options: `python3 run.py --help`
 
 ### Running DDPM or DDIM model for comparison
 
-Running the comparison models is exactly the same as above except now everything is taking place in the `comparison` directory.
+Running the comparison models is exactly the same as above except now everything takes place in the `comparison` directory.
 
 First, make sure you have `cd` into the `comparison` directory. Then, to train the model, 
     
     python3 run.py --config <config_file_name>
 
-To make a sample and regenerate a report on an already pretrained model:
+To make a sample and regenerate a report on an already pre-trained model:
 
     python3 run.py --config <config_file_name> --no-train
 
@@ -82,7 +82,7 @@ For a full list of options: `python3 run.py --help`
 
 ### Profiling MSE and SSIM Losses
 
-It is useful to track the SSIM and MSE values as the model trains. For any command described above, adding the `--profile` flag will do this. If enabled, the model will be sampled at regular intervals during training and the MSE and SSIM over time will appear in the `report.pdf` generated at the end of training. For example:
+It is useful to track the SSIM and MSE values as the model trains. Adding the `--profile` flag will do this for any command described above. If enabled, the model will be sampled at regular intervals during training and the MSE and SSIM over time will appear in the `report.pdf` generated at the end of training. For example:
 
     python3 run.py --config cifar1.yml --profile
 
@@ -92,5 +92,5 @@ All source code is made available under a BSD 3-clause license. You can freely
 use and modify the code, without warranty, so long as you provide attribution
 to the authors. See `LICENSE.md` for the full license text.
 
-The manuscript text is not open source. The authors reserve the rights to the
-article content, which is currently submitted for publication in BMCV.
+The manuscript text is not open source. The authors reserve the right to the
+article content, which is currently submitted for publication in BMVC.
