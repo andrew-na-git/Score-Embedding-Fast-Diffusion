@@ -3,7 +3,6 @@
 by
 Andrew S. Na,
 William Gao,
-Mykhailo Briazkalo,
 and Justin W.L. Wan
 
 This paper has been submitted for publication in [BMVC](https://bmvc2024.org/).
