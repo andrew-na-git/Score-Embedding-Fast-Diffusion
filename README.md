@@ -5,7 +5,7 @@ Andrew S. Na,
 William Gao,
 and Justin W.L. Wan
 
-% This paper has been submitted for publication in [BMVC](https://bmvc2024.org/).
+<This paper has been submitted for publication in [BMVC](https://bmvc2024.org/).>
 
 This repository is the official implementation of **Efficient Denoising using Score Embedding in Score-based Diffusion Models**.
 
