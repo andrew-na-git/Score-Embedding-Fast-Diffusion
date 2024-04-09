@@ -40,7 +40,7 @@ def plot_metrics(metrics):
     if len(ssims) > 0 and len(ssims) == len(mses):
         ## run was profiled, plot both
         # Values to annotate
-        highlight_y_values = [0.99, 0.98, 0.95, 0.90]
+        highlight_y_values = [0.95, 0.90]
         interpolated_x_values_ssim = get_interpolated_values(highlight_y_values, ssims, times)
         # interpolated corresponding mse values
         interpolated_y_values_mse = get_interpolated_values(interpolated_x_values_ssim, times, mses)
