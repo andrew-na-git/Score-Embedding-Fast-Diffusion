@@ -9,6 +9,8 @@ and Justin W.L. Wan
 
 This repository is the official implementation of **Efficient Denoising using Score Embedding in Score-based Diffusion Models**.
 
+A version of our paper can be found on [arXiv](https://arxiv.org/abs/2404.06661)
+
 The goal of this repo is to provide an implementation and demonstrate the efficiency of our denoising model. We solve the log-density FP equation and embed the resulting scores during training. The general idea is captured in the image below:
 
 ![Score Embedding Pipeline](./pipeline_diffusion_cropped.png)
