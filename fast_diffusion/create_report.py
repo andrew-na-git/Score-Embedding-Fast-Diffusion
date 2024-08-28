@@ -10,7 +10,7 @@ import numpy as np
 import torch
 import os
 import matplotlib.pyplot as plt
-from data.metrics import ssim_metric, mse_metric
+from data.metrics import ssim_metric, mse_metric, fid_metric
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -141,7 +141,10 @@ def create_report(folder_path):
     mse = [np.round(x, 4) for x in mse]
     ssim = ssim_metric(ground_truths.numpy(), samples[-1])
     ssim = [np.round(x, 4) for x in ssim]
+    fid = fid_metric(ground_truths, samples[-1])
+    fid = [np.round(x, 4) for x in fid]
     
+    print("FID: ", fid)
     print("SSIM: ", ssim)
     print("MSE: ", mse)
     
@@ -208,6 +211,8 @@ def create_report(folder_path):
     pdf.cell(0, 10, f"MSE Metric: {mse}", align='C')
     pdf.ln()
     pdf.cell(0, 0, f"SSIM Metric: {ssim}", align='C')
+    pdf.ln(10)
+    pdf.cell(0, 0, f"FID Metric: {fid}", align='C')
     pdf.ln(10)
     pdf.cell(0, 0, f"Sample (Num Function Eval: {n_iter})", align="C")
     pdf.ln(7)

@@ -7,7 +7,7 @@ from tqdm import tqdm
 import torch
 from torch.optim import Adam
 from data.Dataset import get_dataset
-from data.metrics import mse_metric, ssim_metric
+from data.metrics import mse_metric, ssim_metric, fid_metric
 
 from .kfp import compute_scores
 from network.network import Net
@@ -44,6 +44,7 @@ def diffuse_train(model, dataset, scores, config, save_folder, profile=False):
   loss_hist_per_image = np.zeros((dataset.n_data, epochs))
   mses = []
   ssims = []
+  fids = []
   profile_times = []
   profile_epochs = []
   for e in tqdm(range(epochs)):
@@ -75,6 +76,7 @@ def diffuse_train(model, dataset, scores, config, save_folder, profile=False):
         np.save(os.path.join(save_folder, "samples", f"sample_{round(cur_running_time, 2)}.npy"), samples)
         mses.append(mse_metric([x.numpy() for x in dataset.data], samples[-1]))
         ssims.append(ssim_metric([x.numpy() for x in dataset.data], samples[-1]))
+        fids.append(fid_metric([x for x in dataset.data], samples[-1]))
         profile_times.append(cur_running_time)
         profile_epochs.append(e)
         model.train()
@@ -95,11 +97,12 @@ def diffuse_train(model, dataset, scores, config, save_folder, profile=False):
 
       mses.append(mse_metric([x.numpy() for x in dataset.data], samples[-1]))
       ssims.append(ssim_metric([x.numpy() for x in dataset.data], samples[-1]))
+      fids.append(fid_metric([x for x in dataset.data], samples[-1]))
       profile_times.append(cur_running_time)
       profile_epochs.append(epochs)
       np.save(os.path.join(save_folder, "samples", f"sample_{round(cur_running_time, 2)}.npy"), samples)
   
-  metrics = dict(losses = loss_hist_per_image, mse = mses, ssim = ssims, times = profile_times, epochs = profile_epochs)
+  metrics = dict(losses = loss_hist_per_image, mse = mses, ssim = ssims, fid = fids, times = profile_times, epochs = profile_epochs)
   return cur_running_time, metrics
 
 
