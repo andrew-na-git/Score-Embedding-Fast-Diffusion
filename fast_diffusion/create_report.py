@@ -141,10 +141,10 @@ def create_report(folder_path):
     mse = [np.round(x, 4) for x in mse]
     ssim = ssim_metric(ground_truths.numpy(), samples[-1])
     ssim = [np.round(x, 4) for x in ssim]
-    fid = fid_metric(ground_truths, samples[-1])
-    fid = [np.round(x, 4) for x in fid]
+    # fid = fid_metric(ground_truths, samples[-1])
+    # fid = [np.round(x, 4) for x in fid]
     
-    print("FID: ", fid)
+    # print("FID: ", fid)
     print("SSIM: ", ssim)
     print("MSE: ", mse)
     
@@ -212,8 +212,8 @@ def create_report(folder_path):
     pdf.ln()
     pdf.cell(0, 0, f"SSIM Metric: {ssim}", align='C')
     pdf.ln(10)
-    pdf.cell(0, 0, f"FID Metric: {fid}", align='C')
-    pdf.ln(10)
+    # pdf.cell(0, 0, f"FID Metric: {fid}", align='C')
+    # pdf.ln(10)
     pdf.cell(0, 0, f"Sample (Num Function Eval: {n_iter})", align="C")
     pdf.ln(7)
     pdf.image(os.path.join(folder_path, "sample.png"), w=190, h=35 * n_data)
