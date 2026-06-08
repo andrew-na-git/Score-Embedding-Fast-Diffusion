@@ -33,6 +33,14 @@ def loss_fn(model, batch, N, sac, s1ac):
     return loss
 
 def train(config, save_folder, profile=False):
+    # Set seeds for reproducibility
+    seed = config.get("data_loader", {}).get("seed", None)
+    if seed is not None:
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+
     N = config["diffusion"]["num_timesteps"] ## num timesteps
     beta_min = config["diffusion"]["beta_min"]
     beta_max = config["diffusion"]["beta_max"]

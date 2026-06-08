@@ -102,7 +102,7 @@ def plot_sample(samples, n):
 def create_report(folder_path):
     today = datetime.now(timezone('US/Eastern'))
 
-    state = torch.load(os.path.join(folder_path, "model.pth"), map_location=device)
+    state = torch.load(os.path.join(folder_path, "model.pth"), map_location=device, weights_only=False)
     config = state["config"]
     sample_method = config["sample"]["type"]
 

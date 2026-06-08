@@ -22,7 +22,8 @@ class Dataset(ABC):
     self.n_data = n_data
     
     transform = v2.Compose([
-      v2.ToImageTensor(),
+      v2.ToImage(),
+      v2.ToDtype(torch.float32, scale=True),
       v2.Resize((image_res, image_res), interpolation=v2.InterpolationMode.BICUBIC, antialias=True)
     ])
     

@@ -5,13 +5,11 @@ Andrew S. Na,
 William Gao,
 and Justin W.L. Wan
 
-<!---This paper has been submitted for publication in [BMVC](https://bmvc2024.org/).--->
+This repository is the official implementation of **Efficient Denoising using Score Embedding in Score-based Diffusion Models** ([arXiv:2404.06661](https://arxiv.org/abs/2404.06661)).
 
-This repository is the official implementation of **Efficient Denoising using Score Embedding in Score-based Diffusion Models**.
+This is a companion reproducibility artifact to *Efficient Score Pre-computation for Diffusion Models via Cross-Matrix Krylov Projection* ([arXiv:2511.17634](https://arxiv.org/abs/2511.17634)), submitted to the [RRPR 2026 Workshop](https://tc22-team.github.io/rrpr2026/).
 
-A version of our paper can be found on [arXiv](https://arxiv.org/abs/2404.06661)
-
-The goal of this repo is to provide an implementation and demonstrate the efficiency of our denoising model. We solve the log-density FP equation and embed the resulting scores during training. The general idea is captured in the image below:
+The goal of this repo is to provide a fully reproducible implementation of score pre-computation via the log-density Fokker-Planck (FP) equation for diffusion model training. The general idea is captured in the image below:
 
 ![Score Embedding Pipeline](./pipeline_diffusion_cropped.png)
 
@@ -33,65 +31,99 @@ We use data from CIFAR, CelebA, and ImageNet datasets. For CelebA and ImageNet d
 
 ## Dependencies
 
-You'll need a working Python environment to run the code.
-The recommended way to set up your environment is through `pip`.
+You'll need a working Python environment to run the code. We recommend using a virtual environment.
 
-We also recommend using `pip` virtual environments to manage the project dependencies in
-isolation.
+### Setup
 
-To install the required packages:
+```bash
+python -m venv .venv
 
-    pip3 install -r requirements.txt
+# Linux/macOS
+source .venv/bin/activate
+
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+
+pip install -r requirements.txt
+```
 
 ## Reproducing the results
 
-All parameters for each run are stored in YAML configuration files. For our fast diffusion model, these can be found in `fast_diffusion/configs`, and for the comparison models, they can be found in `comparison/configs`. Each run will train a model, and save the trained model and a report to the `saves` folder. The report includes a summary of the relevant parameters used to train the model as well as a summary of the loss and a generated sample from the model.
+All parameters for each run are stored in YAML configuration files. For our fast diffusion model, these can be found in `fast_diffusion/configs`, and for the comparison models, they can be found in `comparisons/configs`. Each run will train a model, and save the trained model and a report to the `saves` folder. The report includes a summary of the relevant parameters used to train the model as well as a summary of the loss and a generated sample from the model.
+
+### Quick start — reproduce all experiments
+
+From the repository root, run:
+
+```bash
+python reproduce_all.py
+```
+
+This runs all main configs, ablation configs, and comparison baselines across 3 seeds (9, 42, 123) and writes a summary to `reproduction_summary.csv`.
+
+Options:
+
+```bash
+python reproduce_all.py --main-only          # Only main configs
+python reproduce_all.py --ablations-only     # Only ablation sweeps
+python reproduce_all.py --comparisons-only   # Only DDPM/DDIM baselines
+python reproduce_all.py --seeds 9 42 123 456 # Custom seeds
+python reproduce_all.py --profile            # Track MSE/SSIM over time
+python reproduce_all.py --dry-run            # Print commands without running
+```
 
 ### Running the fast diffusion model
 
-First, make sure you have `cd` into the `fast_diffusion` directory. Then, to train the model, 
-    
-    python3 run.py --config <config_file_name>
+First, make sure you have `cd` into the `fast_diffusion` directory. Then, to train the model:
+
+    python run.py --config <config_file_name>
+
+To override the random seed (for multi-seed reproducibility runs):
+
+    python run.py --config cifar1.yml --seed 42
 
 To make a sample and regenerate a report on an already pre-trained model:
 
-    python3 run.py --config <config_file_name> --no-train
+    python run.py --config <config_file_name> --no-train
 
-For example:
-
-    python3 run.py --config cifar1.yml
-
-For a full list of options: `python3 run.py --help`
+For a full list of options: `python run.py --help`
 
 ### Running DDPM or DDIM model for comparison
 
-Running the comparison models is exactly the same as above except now everything takes place in the `comparison` directory.
+Running the comparison models is exactly the same as above except now everything takes place in the `comparisons` directory.
 
-First, make sure you have `cd` into the `comparison` directory. Then, to train the model, 
-    
-    python3 run.py --config <config_file_name>
-
-To make a sample and regenerate a report on an already pre-trained model:
-
-    python3 run.py --config <config_file_name> --no-train
-
-For example:
-
-    python3 run.py --config cifar1_ddpm.yml
-
-For a full list of options: `python3 run.py --help`
+    cd comparisons
+    python run.py --config cifar1_ddpm.yml
 
 ### Profiling MSE and SSIM Losses
 
-It is useful to track the SSIM and MSE values as the model trains. Adding the `--profile` flag will do this for any command described above. If enabled, the model will be sampled at regular intervals during training and the MSE and SSIM over time will appear in the `report.pdf` generated at the end of training. For example:
+Adding the `--profile` flag will sample the model at regular intervals during training and include MSE and SSIM over time in the generated `report.pdf`:
 
-    python3 run.py --config cifar1.yml --profile
+    python run.py --config cifar1.yml --profile
+
+### Ablation configs
+
+Ablation configs for parameter sensitivity analysis are in `fast_diffusion/configs/ablations/`. These sweep over:
+
+| Parameter | Values | Configs |
+|---|---|---|
+| Grid spacing (`dh`) | 0.5, 1 (baseline), 2, 4 | `cifar1_dh05.yml`, `cifar1_dh2.yml`, `cifar1_dh4.yml` |
+| Timesteps (`N`) | 5, 10, 20 (baseline), 50 | `cifar1_N5.yml`, `cifar1_N10.yml`, `cifar1_N50.yml` |
+| Solve tolerance | 1e-4, 1e-6, 2e-8 (baseline), 1e-10 | `cifar1_tol1e4.yml`, `cifar1_tol1e6.yml`, `cifar1_tol1e10.yml` |
+| Sigma (`σ`) | 3, 5 (baseline), 10, 25 | `cifar1_sigma3.yml`, `cifar1_sigma10.yml`, `cifar1_sigma25.yml` |
+
+### Outputs
+
+Each run produces:
+
+- `saves/<name>/model.pth` — trained model checkpoint
+- `saves/<name>/scores.npy` — pre-computed FP scores
+- `saves/<name>/timing.csv` — wall-clock breakdown (KDE init, FP solve, training)
+- `saves/<name>/convergence_log.csv` — per-iteration FP residual history
+- `saves/<name>/report.pdf` — summary with loss curves and generated samples
 
 ## License
 
 All source code is made available under a BSD 3-clause license. You can freely
 use and modify the code, without warranty, so long as you provide attribution
 to the authors. See `LICENSE.md` for the full license text.
-
-The manuscript text is not open source. The authors reserve the right to the
-article content, which is currently submitted for publication in BMVC.

@@ -1,5 +1,6 @@
 import time
 import os
+import csv
 
 import numpy as np
 from tqdm import tqdm
@@ -102,12 +103,21 @@ def diffuse_train(model, dataset, scores, config, save_folder, profile=False):
       profile_epochs.append(epochs)
       np.save(os.path.join(save_folder, "samples", f"sample_{round(cur_running_time, 2)}.npy"), samples)
   
-  metrics = dict(losses = loss_hist_per_image, mse = mses, ssim = ssims, fid = fids, times = profile_times, epochs = profile_epochs)
+  metrics = dict(losses = loss_hist_per_image, mse = mses, ssim = ssims, fid = [], times = profile_times, epochs = profile_epochs)
   return cur_running_time, metrics
 
 
 def train(config, save_folder, profile=False):
   print(f"Training using device: {device}")
+
+  # Set seeds for reproducibility
+  seed = config.get("data_loader", {}).get("seed", None)
+  if seed is not None:
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+      torch.cuda.manual_seed_all(seed)
+
   dataset = get_dataset(config)
   np.save(os.path.join(save_folder, "dataset.npy"), dataset)
 
@@ -118,7 +128,7 @@ def train(config, save_folder, profile=False):
   
   ## compute the scores
   start_time = time.time()
-  scores_label = compute_scores(config, dataset)
+  scores_label = compute_scores(config, dataset, save_folder=save_folder)
   diffusion_time = time.time() - start_time
 
   # if profiling, create sample folder:
@@ -138,4 +148,12 @@ def train(config, save_folder, profile=False):
   file = os.path.join(save_folder, f'model.pth')
   torch.save(state, file)
   print(f"model has been saved\n")
+
+  # Append training time to timing CSV
+  timing_path = os.path.join(save_folder, "timing.csv")
+  if os.path.exists(timing_path):
+    with open(timing_path, "a", newline="") as f:
+      writer = csv.writer(f)
+      writer.writerow(["training", f"{train_time:.4f}"])
+      writer.writerow(["total", f"{diffusion_time + train_time:.4f}"])
 

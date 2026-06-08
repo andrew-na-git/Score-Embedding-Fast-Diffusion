@@ -39,6 +39,11 @@ if __name__ == "__main__":
                       required=False,
                       action="store_true")
   
+  parser.add_argument("--seed",
+                      help="Override the seed in the config file (for multi-seed runs)",
+                      required=False,
+                      type=int)
+  
   args = parser.parse_args()
   
   ### Read config file
@@ -48,8 +53,14 @@ if __name__ == "__main__":
   with open(config_file_loc, 'r') as f:
     config = yaml.safe_load(f)
 
+  # Override seed if provided via CLI
+  if args.seed is not None:
+    config["data_loader"]["seed"] = args.seed
+
   ### Create save folder
   folder_name = f"{config['name']}_{args.folder_ext}" if args.folder_ext else config['name']
+  if args.seed is not None:
+    folder_name += f"_seed{args.seed}"
   save_folder_loc = os.path.join("saves", folder_name)
   
   if args.no_train:

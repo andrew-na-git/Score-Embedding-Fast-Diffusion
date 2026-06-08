@@ -4,6 +4,9 @@ import torch
 import scipy.stats as stats
 from tqdm import tqdm
 import functools
+import time
+import csv
+import os
 
 def construct_A(H,W,dh,dh2,f,df,g,s):
   a = (f - 0.5 * g**2 *s) * dh + 0.5 * g**2 * dh2
@@ -23,7 +26,9 @@ def construct_B(H, W, m_prev):
   B = m_prev
   return B
 
-def score_samples(dataset):
+def score_samples(dataset, seed=None):
+  if seed is not None:
+    np.random.seed(seed)
   init_m_batch = []
   
   for data in dataset:
@@ -46,7 +51,11 @@ def score_samples(dataset):
     init_m_batch.append(init_m[None])
   return np.vstack(init_m_batch)
 
-def compute_scores(config, dataset):
+def compute_scores(config, dataset, save_folder=None):
+  seed = config.get("data_loader", {}).get("seed", None)
+  if seed is not None:
+    np.random.seed(seed)
+
   n_data = dataset.n_data
   channels = dataset.channels
   H = W = dataset.image_res
@@ -63,7 +72,11 @@ def compute_scores(config, dataset):
   m_prev = np.ones((n_data, N, channels, H*W), dtype=np.float32)
   scores = np.ones((n_data, N, channels, H*W), dtype=np.float32) # initial scores guess
   dm = np.zeros_like(scores, dtype=np.float32)
-  initial_m = score_samples(dataset)
+
+  t_kde_start = time.time()
+  initial_m = score_samples(dataset, seed=seed)
+  t_kde = time.time() - t_kde_start
+
   # we want to sample from random time steps to construct training samples
   time_ = np.linspace(eps, 1, N).astype(np.float32)
   g = diffusion_coeff_fn
@@ -77,9 +90,13 @@ def compute_scores(config, dataset):
     dm[idx, :, channel, 1:-1] = (img_log_prob[:, 2:] - img_log_prob[:, :-2])/(2*dh)
     dm[idx, :, channel, 0] = (img_log_prob[:, 1] - 0)/(2*dh)
     dm[idx, :, channel, -1] = (0 - img_log_prob[:, -2])/(2*dh)
-    
+
+  # Convergence log
+  convergence_log = []  # list of (iteration, data_idx, residual, wall_time)
+
   res = [1] * n_data
   e = 0
+  t_fp_start = time.time()
   while max(res) > tol:
     e += 1
     for idx in tqdm(range(n_data)):
@@ -91,8 +108,29 @@ def compute_scores(config, dataset):
       scores[idx] = dm[idx].copy()
 
       res[idx] = np.linalg.norm(m[idx] - m_prev[idx])/np.linalg.norm(m_prev[idx])
+      wall = time.time() - t_fp_start
+      convergence_log.append((e, idx, res[idx], wall))
       tqdm.write(f'residual at iteration {e} for data {idx}: {res[idx]}')
       m_prev[idx] = m[idx].copy()
+
+  t_fp = time.time() - t_fp_start
+
+  # Save convergence log and timing summary
+  if save_folder is not None:
+    conv_path = os.path.join(save_folder, "convergence_log.csv")
+    with open(conv_path, "w", newline="") as f:
+      writer = csv.writer(f)
+      writer.writerow(["iteration", "data_idx", "residual", "wall_time_s"])
+      writer.writerows(convergence_log)
+
+    timing_path = os.path.join(save_folder, "timing.csv")
+    with open(timing_path, "w", newline="") as f:
+      writer = csv.writer(f)
+      writer.writerow(["stage", "time_s"])
+      writer.writerow(["kde_init", f"{t_kde:.4f}"])
+      writer.writerow(["fp_solve", f"{t_fp:.4f}"])
+      writer.writerow(["fp_iterations", e])
+
   return scores.reshape((n_data, -1, channels, H, W))
 
 def marginal_prob_std(t, sigma):
