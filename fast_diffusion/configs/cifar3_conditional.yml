@@ -25,6 +25,7 @@ training:
 
 model:
   max_positions: 1000 # applys for fourier embedding only
+  num_images: 3
   in_channels: 3
   out_channels: 3
   ch: 128

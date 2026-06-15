@@ -1,0 +1,8 @@
+type,config,seed,success,wall_time,kde_time,fp_time,fp_iters,train_time
+comparison,cifar1_ddpm.yml,,True,0.00,,,,
+comparison,cifar1_ddim.yml,,True,0.00,,,,
+comparison,cifar3_ddpm.yml,,True,0.00,,,,
+comparison,cifar3_ddim.yml,,True,0.00,,,,
+comparison,celeb1_ddpm.yml,,True,0.00,,,,
+comparison,celeb1_ddim.yml,,True,0.00,,,,
+comparison,inet3_ddpm.yml,,True,0.00,,,,

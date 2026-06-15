@@ -78,7 +78,11 @@ class Net(nn.Module):
 
     self.scale_by_sigma = False
 
-  def forward(self, x, labels):
+    # Per-image identity embedding (class-conditioning style)
+    num_images = config["model"].get("num_images", 1)
+    self.img_emb = nn.Embedding(num_images, 4 * nf)
+
+  def forward(self, x, labels, img_idx=None):
     modules = self.all_modules
     m_idx = 0
     if self.conditional:
@@ -89,6 +93,9 @@ class Net(nn.Module):
       m_idx += 1
       temb = modules[m_idx](self.act(temb))
       m_idx += 1
+      # add per-image identity embedding when multiple images are used
+      if img_idx is not None:
+        temb = temb + self.img_emb(img_idx.to(temb.device))
     else:
       temb = None
 

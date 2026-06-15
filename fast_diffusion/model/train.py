@@ -50,8 +50,8 @@ def diffuse_train(model, dataset, scores, config, save_folder, profile=False):
   profile_epochs = []
   for e in tqdm(range(epochs)):
     for i, data in enumerate(dataset):
-      batch, t, diff_std2, std, z = create_batch(init_x[i], scores_label, config, i)
-      loss = slice_wasserstein_loss(model_score, batch.to(device), t.to(device), diff_std2, std, z)
+      batch, t, diff_std2, std, z, img_idx = create_batch(init_x[i], scores_label, config, i)
+      loss = slice_wasserstein_loss(model_score, batch.to(device), t.to(device), diff_std2.to(device), std.to(device), z.to(device), img_idx=img_idx.to(device))
       optimizer.zero_grad()
       loss.backward()
 
@@ -70,13 +70,16 @@ def diffuse_train(model, dataset, scores, config, save_folder, profile=False):
       with torch.no_grad():
         print("Saving sample checkpoint...", flush=True)
         if sample_method == "unconditional":
-          samples, _ = unconditional_sample(model_score, config)
+          n_images = config["data_loader"]["num_images"]
+          all_samples = [unconditional_sample(model_score, config, img_idx=i)[0] for i in range(n_images)]
+          samples = np.stack([s[-1, 0] for s in all_samples], axis=0)  # (n_images, C, H, W)
         else:
           conditional_weight = config["sample"]["conditional_weight"]
-          samples, _ = conditional_sample(model_score, config, dataset.data, conditional_weight)
+          all_samples = [conditional_sample(model_score, config, dataset.data[i:i+1], conditional_weight, img_idx=i)[0] for i in range(len(dataset.data))]
+          samples = np.stack([s[-1, 0] for s in all_samples], axis=0)  # (n_images, C, H, W)
         np.save(os.path.join(save_folder, "samples", f"sample_{round(cur_running_time, 2)}.npy"), samples)
-        mses.append(mse_metric([x.numpy() for x in dataset.data], samples[-1]))
-        ssims.append(ssim_metric([x.numpy() for x in dataset.data], samples[-1]))
+        mses.append(mse_metric([x.numpy() for x in dataset.data], samples))
+        ssims.append(ssim_metric([x.numpy() for x in dataset.data], samples))
         # fids.append(fid_metric([x for x in dataset.data], samples[-1]))
         profile_times.append(cur_running_time)
         profile_epochs.append(e)
@@ -91,14 +94,16 @@ def diffuse_train(model, dataset, scores, config, save_folder, profile=False):
       print("Saving final sample...", flush=True)
 
       if sample_method == "unconditional":
-        samples, _ = unconditional_sample(model_score, config)
+        n_images = config["data_loader"]["num_images"]
+        all_samples = [unconditional_sample(model_score, config, img_idx=i)[0] for i in range(n_images)]
+        samples = np.stack([s[-1, 0] for s in all_samples], axis=0)  # (n_images, C, H, W)
       else:
         conditional_weight = config["sample"]["conditional_weight"]
-        samples, _ = conditional_sample(model_score, config, dataset.data, conditional_weight)
+        all_samples = [conditional_sample(model_score, config, dataset.data[i:i+1], conditional_weight, img_idx=i)[0] for i in range(len(dataset.data))]
+        samples = np.stack([s[-1, 0] for s in all_samples], axis=0)  # (n_images, C, H, W)
 
-      mses.append(mse_metric([x.numpy() for x in dataset.data], samples[-1]))
-      ssims.append(ssim_metric([x.numpy() for x in dataset.data], samples[-1]))
-      # fids.append(fid_metric([x for x in dataset.data], samples[-1]))
+      mses.append(mse_metric([x.numpy() for x in dataset.data], samples))
+      ssims.append(ssim_metric([x.numpy() for x in dataset.data], samples))
       profile_times.append(cur_running_time)
       profile_epochs.append(epochs)
       np.save(os.path.join(save_folder, "samples", f"sample_{round(cur_running_time, 2)}.npy"), samples)

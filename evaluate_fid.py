@@ -21,6 +21,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from pathlib import Path
+import re
 from collections import defaultdict
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "fast_diffusion"))
@@ -54,43 +55,66 @@ def load_experiment(save_folder):
 
 
 def generate_samples(model, config, ground_truths, num_samples=1):
-    """Generate samples from a trained model."""
+    """Generate samples from a trained model, one image at a time.
+
+    Returns:
+        numpy array of shape (n_images, C, H, W) — final-timestep images only.
+    """
     sample_method = config["sample"]["type"]
     with torch.no_grad():
         if sample_method == "unconditional":
-            samples, n_eval = unconditional_sample(model, config)
+            n_images = config["data_loader"]["num_images"]
+            final_images = []
+            for i in range(n_images):
+                samples, _ = unconditional_sample(model, config, img_idx=i)
+                # samples: (timesteps, 1, C, H, W) — take last timestep, squeeze image dim
+                final_images.append(samples[-1, 0])
+            return np.stack(final_images, axis=0)  # (n_images, C, H, W)
         else:
             conditional_weight = config["sample"]["conditional_weight"]
             gt_tensor = torch.from_numpy(ground_truths) if isinstance(ground_truths, np.ndarray) else ground_truths
-            samples, n_eval = conditional_sample(model, config, gt_tensor, conditional_weight)
-    return samples  # shape: (timesteps, n_images, C, H, W)
+            final_images = []
+            for i in range(len(gt_tensor)):
+                single_gt = gt_tensor[i:i+1]
+                samples, _ = conditional_sample(model, config, single_gt, conditional_weight, img_idx=i)
+                final_images.append(samples[-1, 0])
+            return np.stack(final_images, axis=0)  # (n_images, C, H, W)
 
 
-def compute_fid(ground_truths, generated, feature_dim=2048):
+def compute_fid(ground_truths_nchw, generated_nchw, feature_dim=2048):
     """Compute FID between ground truth and generated images using torchmetrics.
 
-    Both inputs should be numpy arrays of shape (N, C, H, W) with values in [0, 1].
-    Images are converted to uint8 tensors as required by FrechetInceptionDistance.
+    Args:
+        ground_truths_nchw: numpy (N, C, H, W) in [0, 1]
+        generated_nchw:     numpy (M, C, H, W), any scale — will be normalised
+
+    FID requires at least `feature_dim` images on each side for a reliable
+    covariance estimate.  With feature_dim=64 that threshold is ~64 images;
+    with 2048 you need thousands.  We tile the GT to match the generated count.
+    Returns None if there are too few samples to compute FID.
     """
-    fid = FrechetInceptionDistance(feature=feature_dim, normalize=True).to(device)
+    if len(ground_truths_nchw) < 2 and len(generated_nchw) < 2:
+        return None  # both sides have only 1 sample — cannot compute FID
 
-    # Ground truth — replicate if few images to get stable statistics
-    gt = torch.from_numpy(ground_truths).float()
-    if gt.shape[0] < 2:
-        gt = gt.repeat(2, 1, 1, 1)  # FID needs at least 2 images
+    fid_metric = FrechetInceptionDistance(feature=feature_dim, normalize=True).to(device)
 
-    gen = torch.from_numpy(generated).float()
-    # Normalize to [0, 1]
+    gt = torch.from_numpy(ground_truths_nchw).float()
+    gen = torch.from_numpy(generated_nchw).float()
+    # Normalise generated to [0, 1]
     gen = (gen - gen.min()) / (gen.max() - gen.min() + 1e-8)
 
-    if gen.shape[0] < 2:
-        gen = gen.repeat(2, 1, 1, 1)
+    # Tile the smaller set so cardinalities are equal (avoids rank-deficient covariance)
+    if gt.shape[0] < gen.shape[0]:
+        reps = int(np.ceil(gen.shape[0] / gt.shape[0]))
+        gt = gt.repeat(reps, 1, 1, 1)[: gen.shape[0]]
+    elif gen.shape[0] < gt.shape[0]:
+        reps = int(np.ceil(gt.shape[0] / gen.shape[0]))
+        gen = gen.repeat(reps, 1, 1, 1)[: gt.shape[0]]
 
-    fid.update(gt.to(device), real=True)
-    fid.update(gen.to(device), real=False)
-
-    score = fid.compute().item()
-    fid.reset()
+    fid_metric.update(gt.to(device), real=True)
+    fid_metric.update(gen.to(device), real=False)
+    score = fid_metric.compute().item()
+    fid_metric.reset()
     return score
 
 
@@ -118,14 +142,14 @@ def compile_image_grid(results, output_path):
             ax_gt = axes[row_idx, col_idx]
             ax_gen = axes[row_idx, max_images + col_idx]
 
-            if col_idx < n_img:
+            if col_idx < n_img and col_idx < len(gen):
                 # Ground truth
                 img_gt = np.clip(gt[col_idx].transpose(1, 2, 0), 0, 1)
                 ax_gt.imshow(img_gt)
                 if row_idx == 0:
                     ax_gt.set_title(f"GT {col_idx + 1}", fontsize=9)
 
-                # Generated
+                # Generated — gen is (n_images, C, H, W)
                 img_gen = gen[col_idx]
                 img_gen = (img_gen - img_gen.min()) / (img_gen.max() - img_gen.min() + 1e-8)
                 img_gen = np.clip(img_gen.transpose(1, 2, 0), 0, 1)
@@ -160,7 +184,8 @@ def main():
     parser.add_argument("--compile-only", action="store_true",
                         help="Only compile image grids, skip FID computation")
     parser.add_argument("--feature-dim", type=int, default=2048,
-                        help="InceptionV3 feature dimension for FID (64, 192, 768, or 2048)")
+                        help="InceptionV3 feature dimension for FID (64, 192, 768, or 2048). "
+                             "Use 64 for small datasets (1-3 images); 2048 for large batches.")
     args = parser.parse_args()
 
     output_dir = args.output
@@ -197,51 +222,119 @@ def main():
         samples_path = os.path.join(folder, "samples.npy")
         if os.path.exists(samples_path):
             print(f"  Loading existing samples from {samples_path}")
-            samples = np.load(samples_path)
-            generated = samples[-1]  # last timestep = final output
+            raw = np.load(samples_path)
+            # Support legacy format (timesteps, n_images, C, H, W) — extract last timestep
+            if raw.ndim == 5:
+                raw = raw[-1]  # (n_images, C, H, W)
         else:
             print(f"  Generating samples...")
-            samples = generate_samples(exp["model"], exp["config"], exp["ground_truths"])
-            generated = samples[-1]
+            raw = generate_samples(exp["model"], exp["config"], exp["ground_truths"])
+            np.save(samples_path, raw)
 
-        gt = exp["ground_truths"]
-        n_images = gt.shape[0] if gt is not None else 0
+        # raw is now (n_images, C, H, W) — final-timestep images
+        gt = exp["ground_truths"]  # (n_train, C, H, W)
+        n_train = gt.shape[0] if gt is not None else 0
 
         results.append({
             "name": name,
             "ground_truths": gt,
-            "generated": generated,
-            "n_images": n_images,
+            "generated": raw,       # (n_images, C, H, W) for image grid
+            "generated_all": raw,   # same — used for pooled FID
+            "n_images": n_train,
         })
 
-        # FID
+        # FID using last-timestep generated images only
         if not args.compile_only and gt is not None:
-            try:
-                fid_score = compute_fid(gt, generated, feature_dim=args.feature_dim)
-                print(f"  FID: {fid_score:.4f}")
-                fid_rows.append({"experiment": name, "fid": fid_score, "n_images": n_images})
-            except Exception as e:
-                print(f"  FID failed: {e}")
-                fid_rows.append({"experiment": name, "fid": "ERROR", "n_images": n_images})
+            fid_score = compute_fid(gt, raw, feature_dim=args.feature_dim)
+            if fid_score is not None:
+                print(f"  FID ({len(raw)} gen vs tiled GT, "
+                      f"feature={args.feature_dim}): {fid_score:.4f}")
+                fid_rows.append({"experiment": name, "fid": fid_score,
+                                 "n_generated": len(raw), "n_train": n_train})
+            else:
+                print(f"  FID skipped: need >=2 samples (have {len(raw)} gen, {n_train} GT)")
+                fid_rows.append({"experiment": name, "fid": "ERROR",
+                                 "n_generated": len(raw), "n_train": n_train})
 
-    # Save FID results
+    # ------------------------------------------------------------------ #
+    # Pooled FID per config (across all seeds combined)                   #
+    # ------------------------------------------------------------------ #
+    import re
+    if not args.compile_only:
+        config_groups = defaultdict(list)
+        for r in results:
+            base = re.sub(r"_seed\d+$", "", r["name"])
+            config_groups[base].append(r)
+
+        pooled_rows = []
+        for base, group in config_groups.items():
+            all_gen = np.concatenate([g["generated_all"] for g in group if g["generated_all"] is not None], axis=0)
+            gt_any = group[0]["ground_truths"]
+            n_seeds = len(group)
+            pooled_fid = compute_fid(gt_any, all_gen, feature_dim=args.feature_dim)
+            if pooled_fid is not None:
+                print(f"  Pooled FID [{base}] ({len(all_gen)} imgs, {n_seeds} seeds): "
+                      f"{pooled_fid:.4f}")
+                pooled_rows.append({"config": base, "fid_pooled": pooled_fid,
+                                    "n_generated": len(all_gen), "n_seeds": n_seeds})
+            else:
+                print(f"  Pooled FID [{base}]: skipped (too few samples)")
+
+        # Global FID: only configs with matching spatial resolution
+        try:
+            # Group by spatial size to avoid cross-resolution concatenation
+            by_size = defaultdict(list)
+            for r in results:
+                if r["generated_all"] is not None and r["ground_truths"] is not None:
+                    h = r["generated_all"].shape[2]
+                    by_size[h].append(r)
+            for h, group in by_size.items():
+                all_gen_global = np.concatenate([r["generated_all"] for r in group], axis=0)
+                all_gt_global  = np.concatenate([r["ground_truths"]  for r in group], axis=0)
+                global_fid = compute_fid(all_gt_global, all_gen_global, feature_dim=args.feature_dim)
+                if global_fid is not None:
+                    print(f"\n  GLOBAL FID ({h}x{h} images, all configs+seeds) "
+                          f"({len(all_gen_global)} gen imgs, feature={args.feature_dim}): "
+                          f"{global_fid:.4f}")
+                    pooled_rows.append({"config": f"ALL_{h}x{h}", "fid_pooled": global_fid,
+                                        "n_generated": len(all_gen_global), "n_seeds": len(group)})
+        except Exception as e:
+            print(f"  Global FID failed: {e}")
+
+        if pooled_rows:
+            pooled_path = os.path.join(output_dir, "fid_pooled.csv")
+            with open(pooled_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=["config", "fid_pooled",
+                                                       "n_generated", "n_seeds"])
+                writer.writeheader()
+                writer.writerows(pooled_rows)
+            print(f"\nPooled FID saved to: {pooled_path}")
+            print(f"\n{'='*60}")
+            print(f"POOLED FID (all seeds, feature={args.feature_dim})")
+            print(f"{'='*60}")
+            print(f"{'Config':<40} {'FID':>10} {'N gen':>8}")
+            print("-" * 60)
+            for r in pooled_rows:
+                print(f"{r['config']:<40} {r['fid_pooled']:>10.4f} {r['n_generated']:>8}")
+
+    # Save per-seed FID results
     if fid_rows:
         fid_path = os.path.join(output_dir, "fid_scores.csv")
         with open(fid_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["experiment", "fid", "n_images"])
+            writer = csv.DictWriter(f, fieldnames=["experiment", "fid", "n_generated", "n_train"])
             writer.writeheader()
             writer.writerows(fid_rows)
-        print(f"\nFID scores saved to: {fid_path}")
+        print(f"\nPer-seed FID scores saved to: {fid_path}")
 
         # Print summary table
-        print(f"\n{'='*50}")
-        print("FID SCORES")
-        print(f"{'='*50}")
-        print(f"{'Experiment':<40} {'FID':>10} {'Images':>8}")
-        print("-" * 60)
+        print(f"\n{'='*60}")
+        print(f"PER-SEED FID (feature={args.feature_dim})")
+        print(f"{'='*60}")
+        print(f"{'Experiment':<40} {'FID':>10} {'N gen':>8}")
+        print("-" * 62)
         for r in fid_rows:
             fid_str = f"{r['fid']:.4f}" if isinstance(r['fid'], float) else r['fid']
-            print(f"{r['experiment']:<40} {fid_str:>10} {r['n_images']:>8}")
+            print(f"{r['experiment']:<40} {fid_str:>10} {r['n_generated']:>8}")
 
     # Compile image grids
     if results:
@@ -251,7 +344,6 @@ def main():
 
         # Grid 2: Group by config base (show seed variation)
         groups = defaultdict(list)
-        import re
         for r in results:
             base = re.sub(r"_seed\d+$", "", r["name"])
             groups[base].append(r)

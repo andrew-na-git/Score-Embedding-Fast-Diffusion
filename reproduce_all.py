@@ -78,6 +78,15 @@ def run_experiment(working_dir, config, seed=None, profile=False):
         folder_name += f"_seed{seed}"
     save_folder = os.path.join(working_dir, "saves", folder_name)
 
+    # Skip if already completed
+    if os.path.exists(os.path.join(save_folder, "model.pth")):
+        print(f"\n{'='*60}")
+        print(f"SKIPPING (already complete): {folder_name}")
+        print(f"{'='*60}")
+        timing = collect_timing(save_folder)
+        wall = float(timing.get("total", 0))
+        return True, wall, save_folder
+
     print(f"\n{'='*60}")
     print(f"Running: {' '.join(cmd)}")
     print(f"  Working dir: {working_dir}")

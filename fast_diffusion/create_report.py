@@ -130,25 +130,25 @@ def create_report(folder_path):
     ground_truths = torch.from_numpy(np.load(os.path.join(folder_path, "dataset.npy")))
 
     if sample_method == "unconditional":
-      samples, n_iter = unconditional_sample(model, config)
+      results = [unconditional_sample(model, config, img_idx=i) for i in range(n_data)]
+      all_samples = [r[0] for r in results]
+      n_iter = sum(r[1] for r in results)
+      samples = np.stack([s[-1, 0] for s in all_samples], axis=0)  # (n_images, C, H, W)
     else:
       conditional_weight = config["sample"]["conditional_weight"]
-      samples, n_iter = conditional_sample(model, config, ground_truths, conditional_weight)
+      results = [conditional_sample(model, config, ground_truths[i:i+1], conditional_weight, img_idx=i) for i in range(n_data)]
+      all_samples = [r[0] for r in results]
+      n_iter = sum(r[1] for r in results)
+      samples = np.stack([s[-1, 0] for s in all_samples], axis=0)  # (n_images, C, H, W)
     
     np.save(os.path.join(folder_path, "samples.npy"), samples)
 
-    mse = mse_metric(ground_truths.numpy(), samples[-1])
+    mse = mse_metric(ground_truths.numpy(), samples)
     mse = [np.round(x, 4) for x in mse]
-    ssim = ssim_metric(ground_truths.numpy(), samples[-1])
+    ssim = ssim_metric(ground_truths.numpy(), samples)
     ssim = [np.round(x, 4) for x in ssim]
-    # fid = fid_metric(ground_truths, samples[-1])
-    # fid = [np.round(x, 4) for x in fid]
     
-    # print("FID: ", fid)
-    print("SSIM: ", ssim)
-    print("MSE: ", mse)
-    
-    sample_plot = plot_sample(samples, 5)
+    sample_plot = plot_sample(all_samples[0], 5)
     sample_plot.savefig(os.path.join(folder_path, "sample.png"))
 
     class PDF(FPDF):

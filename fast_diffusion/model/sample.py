@@ -12,7 +12,8 @@ def __ode_sampler(score_model,
                 H=32,
                 W=32,
                 temb_method="linear",
-                timestep_multiplier = 1000):
+                timestep_multiplier = 1000,
+                img_idx=None):
   atol = rtol = 1e-3
   device = "cuda" if torch.cuda.is_available() else "cpu"
   eps = 1e-3
@@ -28,12 +29,12 @@ def __ode_sampler(score_model,
     """A wrapper of the score-based model for use by the ODE solver."""
     sample = torch.tensor(sample, device=device, dtype=torch.float32).reshape(shape)
     time_steps = torch.tensor(time_steps, device=device, dtype=torch.float32).reshape((sample.shape[0], ))
-    if temb_method == "linear":
-      time_steps += (torch.tensor(list(range(sample.shape[0])), device=device) - batch_size/2) * timestep_multiplier
-    else:
-     time_steps *= timestep_multiplier
+    time_steps *= timestep_multiplier
+    idx_tensor = None
+    if img_idx is not None:
+      idx_tensor = torch.full((sample.shape[0],), img_idx, dtype=torch.long, device=device)
     with torch.no_grad():
-      score = score_model(sample, time_steps)
+      score = score_model(sample, time_steps, img_idx=idx_tensor)
     return score.cpu().numpy().reshape((-1,)).astype(np.float64)
 
   def ode_func(t, x):
@@ -51,7 +52,7 @@ def __ode_sampler(score_model,
 
   return np.array(x), res.nfev
 
-def unconditional_sample(model, config):
+def unconditional_sample(model, config, img_idx=None):
   model.eval()
 
   sigma = config["diffusion"]["sigma"]
@@ -60,13 +61,13 @@ def unconditional_sample(model, config):
   H = W = config["data_loader"]["image_size"]
   time_embedding_method = config["model"]["embedding_method"]
   timestep_multiplier = config["training"]["timestep_multiplier"]
-  samples, n_eval = __ode_sampler(model, sigma, batch_size, channels, None, None, H, W, time_embedding_method, timestep_multiplier=timestep_multiplier)
+  samples, n_eval = __ode_sampler(model, sigma, batch_size, channels, None, None, H, W, time_embedding_method, timestep_multiplier=timestep_multiplier, img_idx=img_idx)
 
   # only save 50 steps
   idx = np.linspace(0, len(samples) - 1, num=50).astype(int)
   return samples[idx], n_eval
 
-def conditional_sample(model, config, dataset, cond_weight = 0.1):
+def conditional_sample(model, config, dataset, cond_weight = 0.1, img_idx=None):
   model.eval()
 
   sigma = config["diffusion"]["sigma"]
@@ -75,7 +76,7 @@ def conditional_sample(model, config, dataset, cond_weight = 0.1):
   channels = config["data_loader"]["channels"]
   H = W = config["data_loader"]["image_size"]
   time_embedding_method = config["model"]["embedding_method"]
-  samples, n_eval = __ode_sampler(model, sigma, len(dataset), channels, dataset, cond_weight, H, W, time_embedding_method, timestep_multiplier=timestep_multiplier)
+  samples, n_eval = __ode_sampler(model, sigma, len(dataset), channels, dataset, cond_weight, H, W, time_embedding_method, timestep_multiplier=timestep_multiplier, img_idx=img_idx)
 
   # only save 50 steps
   idx = np.linspace(0, len(samples) - 1, num=50).astype(int)

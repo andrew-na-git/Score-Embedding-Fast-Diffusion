@@ -1,0 +1,41 @@
+name: celeb1_kde_scipy
+
+data_loader:
+  num_images: 1
+  image_size: 64
+  dataset: celeb
+  seed: 0
+  channels: 3
+  batch_size: 10
+
+diffusion:
+  sigma: 2
+  dh: 1
+  num_timesteps: 10
+  solve_tolerance: 1e-6
+  kde_method: scipy  # exact O(N^2) — baseline for quality comparison
+
+training:
+  epochs: 750
+  lr: 1e-4
+  grad_clip: False
+  timestep_multiplier: 1
+
+model:
+  max_positions: 10000
+  in_channels: 3
+  out_channels: 3
+  ch: 128
+  ch_mult: [1, 2, 2, 2]
+  num_res_blocks: 2
+  attention_resolutions: [16, ]
+  dropout: 0.1
+  resample_with_conv: False
+  embedding_method: linear
+
+sample:
+  type: unconditional
+
+misc:
+  eps: 1e-3
+  profile_freq: 5

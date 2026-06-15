@@ -12,7 +12,7 @@ diffusion:
   sigma: 5
   dh: 1
   num_timesteps: 20
-  solve_tolerance: 1e-10
+  solve_tolerance: 1e-6
 
 training:
   epochs: 300

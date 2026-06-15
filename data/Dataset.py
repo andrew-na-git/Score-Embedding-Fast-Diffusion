@@ -16,7 +16,7 @@ import os
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
 class Dataset(ABC):
-  def __init__(self, image_res=32, n_data=1, repeat_dataset=1, sample=True):
+  def __init__(self, image_res=32, n_data=1, repeat_dataset=1, sample=True, rotate_augment=False):
     self.repeat = repeat_dataset
     self.image_res = image_res
     self.n_data = n_data
@@ -38,7 +38,17 @@ class Dataset(ABC):
 
     # normalize to [0, 1]
     self.data = [(raw - raw.min())/(raw.max() - raw.min()) for raw in self.data]
-    
+
+    # rotation augmentation: expand each image with 90°, 180°, 270° rotations
+    if rotate_augment:
+      augmented = []
+      for img in self.data:
+        augmented.append(img)
+        augmented.append(torch.rot90(img, k=1, dims=[-2, -1]))
+        augmented.append(torch.rot90(img, k=2, dims=[-2, -1]))
+        augmented.append(torch.rot90(img, k=3, dims=[-2, -1]))
+      self.data = augmented
+
     self.data = torch.stack(self.data)
 
   @abstractmethod
@@ -68,17 +78,18 @@ class Dataset(ABC):
     return fig;
   
   def __len__(self):
-    return self.n_data * self.repeat
+    return len(self.data) * self.repeat
   
   def __getitem__(self, idx):
-    if idx >= self.n_data * self.repeat:
+    n = len(self.data)
+    if idx >= n * self.repeat:
       raise StopIteration()
-    return self.data[idx % self.n_data]
+    return self.data[idx % n]
     
 class CIFARDataset(Dataset):
-  def __init__(self, image_res=32, n_data=1, seed=9, repeat_dataset=1):
+  def __init__(self, image_res=32, n_data=1, seed=9, repeat_dataset=1, rotate_augment=False):
     np.random.seed(seed)
-    super().__init__(image_res, n_data, repeat_dataset)
+    super().__init__(image_res, n_data, repeat_dataset, rotate_augment=rotate_augment)
     self.channels = 3
     
   def get_raw_data(self):
@@ -87,8 +98,8 @@ class CIFARDataset(Dataset):
     return cifar.data[np.array(cifar.targets) == 5]
 
 class ImageNetDataset(Dataset):
-  def __init__(self, image_res=64, n_data=1, seed=9, repeat_dataset=1):
-    super().__init__(image_res, n_data, repeat_dataset, sample=False)
+  def __init__(self, image_res=64, n_data=1, seed=9, repeat_dataset=1, rotate_augment=False):
+    super().__init__(image_res, n_data, repeat_dataset, sample=False, rotate_augment=rotate_augment)
     self.channels = 3
     
   def get_raw_data(self):
@@ -103,8 +114,8 @@ class ImageNetDataset(Dataset):
     return raw_data
 
 class CelebDataset(Dataset):
-  def __init__(self, image_res=64, n_data=1, seed=9, repeat_dataset=1):
-    super().__init__(image_res, n_data, repeat_dataset, sample=False)
+  def __init__(self, image_res=64, n_data=1, seed=9, repeat_dataset=1, rotate_augment=False):
+    super().__init__(image_res, n_data, repeat_dataset, sample=False, rotate_augment=rotate_augment)
     self.channels = 3
     
   def get_raw_data(self):
@@ -124,7 +135,8 @@ def get_dataset(config, repeat = 1):
   n_data = config["data_loader"]["num_images"]
   img_size = config["data_loader"]["image_size"]
   seed = config["data_loader"]["seed"]
-  
+  rotate_augment = config["data_loader"].get("rotate_augment", False)
+
   if dataset == "cifar":
     dataset_class = CIFARDataset
   elif dataset == "celeb":
@@ -134,5 +146,5 @@ def get_dataset(config, repeat = 1):
   else:
     raise NotImplementedError(f"Dataset {dataset} is not a valid dataset")
 
-  return dataset_class(img_size, n_data, seed, repeat)
+  return dataset_class(img_size, n_data, seed, repeat, rotate_augment=rotate_augment)
   

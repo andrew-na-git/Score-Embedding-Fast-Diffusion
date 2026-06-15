@@ -10,7 +10,6 @@ def create_batch(x, scores, config, idx):
   N = config["diffusion"]["num_timesteps"]
   sigma = config["diffusion"]["sigma"]
   time_embed_method = config["model"]["embedding_method"]
-  n_data = config["data_loader"]["num_images"]
   batch_size = config["data_loader"]["batch_size"]
   timestep_multiplier = config["training"]["timestep_multiplier"]
 
@@ -36,10 +35,7 @@ def create_batch(x, scores, config, idx):
     # we perturb the image by the forward SDE conditional distribution
     perturbed_x.append(x + z * std[:, None, None, None])
 
-    if time_embed_method == "linear":
-      t.append(timestep_multiplier * (random_t + idx - n_data/2))
-    else:
-      t.append(random_t * (timestep_multiplier - 1))
+    t.append(random_t * timestep_multiplier)
 
     stds.append(std)
     diff_stds.append(diff_std2)
@@ -52,4 +48,6 @@ def create_batch(x, scores, config, idx):
   zs = torch.concatenate(zs)
 
   indices = np.sort(np.random.choice(len(perturbed_x), batch_size, replace=False))
-  return perturbed_x[indices], t[indices], diff_stds[indices], stds[indices], zs[indices]
+  # img_idx tensor: same image index for every item in this batch
+  img_idx = torch.full((batch_size,), idx, dtype=torch.long)
+  return perturbed_x[indices], t[indices], diff_stds[indices], stds[indices], zs[indices], img_idx
