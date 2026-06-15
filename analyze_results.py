@@ -262,7 +262,7 @@ def plot_convergence(groups, output_dir):
 
 
 def plot_runtime_breakdown(groups, output_dir):
-    """Pie chart of runtime breakdown for main configs."""
+    """Stacked bar chart of runtime breakdown for main configs."""
     for config_name, entries in sorted(groups.items()):
         if any(x in config_name for x in ["_dh", "_N5", "_N10", "_N50", "_tol", "_sigma"]):
             continue
@@ -276,14 +276,24 @@ def plot_runtime_breakdown(groups, output_dir):
         if not kde_times:
             continue
 
-        labels = ["KDE Init", "FP Solve", "Training"]
-        sizes = [np.mean(kde_times), np.mean(fp_times), np.mean(train_times)]
-        if sum(sizes) == 0:
+        means = [np.mean(kde_times), np.mean(fp_times), np.mean(train_times)]
+        stds  = [np.std(kde_times),  np.std(fp_times),  np.std(train_times)]
+        if sum(means) == 0:
             continue
 
-        fig, ax = plt.subplots(figsize=(5, 5))
-        ax.pie(sizes, labels=labels, autopct="%1.1f%%", startangle=90)
+        labels = ["KDE Init", "FP Solve", "Training"]
+        colors = ["#4c78a8", "#f58518", "#54a24b"]
+
+        fig, ax = plt.subplots(figsize=(4, 3))
+        bottom = 0.0
+        for label, mean, std, color in zip(labels, means, stds, colors):
+            ax.bar([config_name], [mean], bottom=bottom, label=label, color=color,
+                   yerr=[[0], [std]], capsize=4, error_kw={"elinewidth": 1})
+            bottom += mean
+        ax.set_ylabel("Time (s)")
         ax.set_title(f"Runtime Breakdown: {config_name}")
+        ax.legend(fontsize=8)
+        ax.grid(axis="y", alpha=0.3)
         fig.tight_layout()
         path = os.path.join(output_dir, f"runtime_{config_name}.pdf")
         fig.savefig(path, dpi=150)
