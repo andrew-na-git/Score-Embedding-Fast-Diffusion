@@ -1,4 +1,7 @@
-"""Spatio-temporal score network.
+"""Spatio-temporal score network for 2D dynamic video.
+
+The name says 3d because the convolutions are `Conv3d`; the data is 2D video,
+(T, C, H, W). No volumetric support is claimed or implemented.
 
 `network/network.py` is a 2D DDPM UNet. Rather than duplicate it, this module
 reuses its building blocks and inserts temporal mixing, so the spatial pathway

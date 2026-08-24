@@ -4,7 +4,6 @@ Usage
 -----
     python run_video.py --config synth_inpaint.yml
     python run_video.py --config synth_inpaint.yml --epochs 5 --smoke
-    python run_video.py --config folder_inpaint.yml --measure-warm-start
     python run_video.py --config synth_inpaint.yml --no-train   # evaluate a checkpoint
 
 What it reports, and why
@@ -48,14 +47,41 @@ CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           "fast_diffusion", "configs", "video")
 
 
-def build_mask(config, clip):
+def build_mask(config, clip, dataset=None, clip_idx=None):
+    """The hole to fill: the dataset's real mask when it has one, else synthetic.
+
+    A dataset that ships real object masks (DAVIS) must take precedence over a
+    generated box or stroke, and the choice has to be recorded in the results,
+    because masked metrics are not comparable across mask families. A synthetic box
+    covering 6% of the frame and a DAVIS object mask covering 55% are different
+    tasks, and a table that mixes them says nothing.
+
+    Returns (mask, source_name).
+    """
     icfg = config.get("inpaint", {})
+    requested = config.get("evaluation", {}).get("mask_kind",
+                                                 icfg.get("mask", "moving_box"))
+
+    if requested == "dataset":
+        if dataset is None or not hasattr(dataset, "real_mask"):
+            raise ValueError(
+                "evaluation.mask_kind='dataset' but "
+                f"{type(dataset).__name__} provides no real_mask(); use a DAVIS "
+                "config or set a synthetic mask kind"
+            )
+        mask = torch.as_tensor(dataset.real_mask(clip_idx), dtype=torch.float32)
+        name = f"dataset:{getattr(dataset, 'sequence_name', lambda i: i)(clip_idx)}"
+        # The dataset resizes masks itself with nearest-neighbour; dilation is a
+        # separate, config-level decision applied here for non-DAVIS sources.
+        return mask, name
+
     T, _, H, W = clip.shape
     kwargs = {k: v for k, v in icfg.items() if k not in ("mask", "dilate")}
-    return inpaint.make_mask(
-        icfg.get("mask", "moving_box"), T, H, W,
+    mask = inpaint.make_mask(
+        requested, T, H, W,
         dilate=int(icfg.get("dilate", 0)), **kwargs,
     )
+    return mask, f"synthetic:{requested}"
 
 
 def get_flows(config, clip, dataset, clip_idx):
@@ -154,9 +180,6 @@ def main():
                          "smoke run are not usable as results")
     ap.add_argument("--no-train", action="store_true",
                     help="load model.pth from the output directory instead of training")
-    ap.add_argument("--measure-warm-start", action="store_true",
-                    help="also solve each clip cold, so the warm-start speedup is "
-                         "measured against a control instead of asserted")
     ap.add_argument("--skip-baselines", action="store_true")
     ap.add_argument("--seed", type=int, default=None)
     args = ap.parse_args()
@@ -208,10 +231,7 @@ def main():
         model.load_state_dict(ckpt["model"])
         train_summary = {"loaded_from": ckpt_path}
     else:
-        train_summary = train_video(
-            config, out_dir, device=device,
-            measure_warm_start=args.measure_warm_start,
-        )
+        train_summary = train_video(config, out_dir, device=device)
         ckpt = torch.load(os.path.join(out_dir, "model.pth"),
                           map_location=device, weights_only=False)
         model = VideoNet(config)
@@ -227,9 +247,9 @@ def main():
 
     for idx in range(len(dataset)):
         clip = torch.as_tensor(np.asarray(dataset[idx]), dtype=torch.float32)
-        mask = build_mask(config, clip)
+        mask, mask_source = build_mask(config, clip, dataset, idx)
         cov = inpaint.mask_coverage(mask)
-        print(f"\nclip {idx}: {tuple(clip.shape)}  mask coverage "
+        print(f"\nclip {idx}: {tuple(clip.shape)}  mask {mask_source}  coverage "
               f"{cov['overall']*100:.1f}%")
 
         t0 = time.time()
@@ -259,6 +279,9 @@ def main():
         rep["nfev_total"] = int(sum(info["nfev"]))
         rep["method"] = "video"
         rep["clip"] = idx
+        # Masked metrics are only comparable within one mask family, so the source
+        # travels with every row rather than living in the config alone.
+        rep["mask_source"] = mask_source
         results.append(rep)
 
         print(f"  video      masked PSNR {rep['masked_psnr']:.2f} dB   "
@@ -279,6 +302,7 @@ def main():
                 r["warping_error"] = ev.warping_error(out, f2, m2)
                 r["masked_warping_error"] = ev.masked_warping_error(out, f2, mask, m2)
                 r["flow_method"] = flow_name
+                r["mask_source"] = mask_source
                 r["method"] = name
                 r["clip"] = idx
                 results.append(r)

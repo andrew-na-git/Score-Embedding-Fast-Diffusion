@@ -1,5 +1,12 @@
 """Fokker-Planck solve on spatio-temporal (T, H, W) domains.
 
+Scope: 2D dynamic video
+-----------------------
+`T x H x W` is time plus two further axes, and those two are pixel-*value* axes of the
+density grid, not spatial ones. Nothing here is volumetric, and "the 3D operator"
+below always means "the three-axis linear system". The project scope is 2D imagery in
+motion; dynamic 3D / 4D representations are explicitly out of scope.
+
 Why this module exists
 ----------------------
 `kfp.compute_scores` assembles an (H*W) x (H*W) sparse system and calls `spsolve`,
@@ -409,7 +416,11 @@ def construct_A_3d(T, H, W, g, s, dh, dh2, f=0.0, stencil="upwind"):
 
 
 def unsplit_solve(rhs, g, s, dh, dh2, f=0.0, stencil="upwind"):
-    """Exact sparse solve of the unsplit 3D operator. Validation reference."""
+    """Exact sparse solve of the unsplit three-axis operator. Validation reference.
+
+    "Three-axis" not "3D": the axes are (time, value, value) for a 2D video, so this
+    is not a volumetric solve. Scope is 2D dynamic video throughout.
+    """
     T, H, W = rhs.shape
     A = construct_A_3d(T, H, W, g, s, dh, dh2, f, stencil=stencil)
     return sparse.linalg.spsolve(A, rhs.reshape(-1)).reshape(T, H, W)
@@ -525,7 +536,6 @@ def log_density_gradient_3d(m, dh, axis=-1):
 def compute_scores_clip(
     config,
     initial_m,
-    warm_start_scores=None,
     scheme="line",
     progress=None,
 ):
@@ -537,11 +547,6 @@ def compute_scores_clip(
         solve_tolerance, max_fp_iterations, stencil}` and `misc.eps`.
     initial_m : (C, T, H, W) initial log-density, e.g. from
         `density.SequentialDensityEstimator` reshaped per channel.
-    warm_start_scores : optional (N, C, T, H, W) score field from a previous clip
-        or outer iterate. The FP operator depends on the frame only through the
-        score field, so a warped or previous-clip score collapses the fixed-point
-        iteration count. Without it the field starts at ones, matching
-        `kfp.compute_scores`.
     scheme : 'line' (exact) or 'adi' (single-pass approximation).
     progress : optional callable(iteration, residual).
 
@@ -587,11 +592,7 @@ def compute_scores_clip(
 
     m = np.zeros((N, C, T, H, W))
     m_prev = np.ones_like(m)
-    scores = (
-        np.ones_like(m)
-        if warm_start_scores is None
-        else np.asarray(warm_start_scores, dtype=np.float64).copy()
-    )
+    scores = np.ones_like(m)
 
     residuals = []
     converged = False

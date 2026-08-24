@@ -1,5 +1,8 @@
 """GPU (torch) backend for the spatio-temporal Fokker-Planck solve.
 
+Same scope caveat as `fp_video`: the grid is (time, value, value) for 2D video, so
+"three axes" is never "three spatial dimensions".
+
 Why a separate module
 ---------------------
 `fp_video.py` is a tested numpy implementation and stays the reference. This
@@ -320,7 +323,6 @@ def log_density_gradient_3d_torch(m, dh, axis=-1):
 def compute_scores_clip_torch(
     config,
     initial_m,
-    warm_start_scores=None,
     device=None,
     dtype=torch.float32,
     progress=None,
@@ -357,12 +359,7 @@ def compute_scores_clip_torch(
 
     m = torch.zeros((N, C, T, H, W), dtype=dtype, device=device)
     m_prev = torch.ones_like(m)
-    if warm_start_scores is None:
-        scores = torch.ones_like(m)
-    else:
-        scores = torch.as_tensor(
-            np.asarray(warm_start_scores), dtype=dtype, device=device
-        ).clone()
+    scores = torch.ones_like(m)
 
     residuals = []
     converged = False

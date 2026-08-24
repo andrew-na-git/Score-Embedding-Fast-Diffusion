@@ -23,24 +23,39 @@ The Eurographics paper commits to that regime and extends it along the axis wher
 it has a genuine advantage no static-image method can claim: **temporal
 continuation**.
 
-**Core contribution.** Consecutive video frames have nearly identical FP
-operators. We exploit this twice:
+**Scope: 2D dynamic video.** The domain is `T x H x W` -- two spatial dimensions
+plus time -- throughout. The FP solve runs on a three-axis grid, but two of those
+axes are pixel-*value* axes and the third is time; this is 2D imagery in motion, not
+volumetric or 4D data. Dynamic 3D and 4D representations are explicitly out of scope
+(section 7), and nothing in the paper should be phrased so that a reader infers
+otherwise. The one place the wording matters most is the solver description: "3D
+operator" in `fp_video` refers to the three grid axes of the linear system, not to
+three spatial dimensions.
 
-1. **Sequential importance sampling** replaces per-frame density
-   re-estimation. Frame `k-1`'s converged density is used as a proposal;
-   particles are advected by the estimated motion field and reweighted, so only
-   the residual (content the warped predecessor cannot explain) needs fresh
-   estimation. Temporal coherence holds *by construction*, not via a
-   consistency penalty.
-2. **Cross-frame warm starts.** The FP system matrix depends on the frame only
-   through the score field. Reusing the previous frame's Krylov basis and
-   warped log-density collapses the fixed-point iteration count.
+**Core contribution.** Consecutive video frames have nearly identical FP operators.
+The mechanism that exploits this is:
 
-**Adaptive keyframing.** Effective sample size (ESS) of the importance weights
-degenerates exactly at scene cuts, fast motion, and disocclusions. Thresholding
-ESS gives a principled automatic keyframe detector and a single cost/quality
-knob -- and a far better ablation axis than the existing `dh` / `N` / `tol`
-sweeps.
+**Sequential importance sampling with a KL-triggered keyframe rule.** Frame `k-1`'s
+converged density is used as a proposal; particles are advected by the estimated
+motion field and reweighted, so only the residual -- content the warped predecessor
+cannot explain -- needs fresh estimation. Temporal coherence holds *by construction*,
+not via a consistency penalty. A KL statistic on the importance weights decides when
+the proposal has stopped being usable and a full re-estimate is required.
+
+Measured (`benchmark_keyframe_trigger.py`, 24 frames at 64x64): the incremental
+correction is **7.54x cheaper per frame** than re-estimating (3.3 ms vs 24.5 ms); the
+KL statistic separates an injected cut from within-shot variation by **2591x** against
+the worst within-shot frame (33931x on the mean); and it fires **zero** false
+positives across 23 control frames while detecting the cut exactly. ESS, the
+originally proposed trigger, moves by only 0.871x on the same sequence -- see 8.5.
+
+**Removed: cross-frame warm starts.** An earlier revision also warm-started each
+clip's fixed-point iteration from the previous clip's converged score field. Measured
+against a cold-start control it was worth 1.12x, and it is gone. The cause was
+structural rather than a tuning failure: upwinding already converges in 4-5 iterations
+from cold, so the stability work had consumed the headroom the warm start existed to
+exploit. Section 8.3b records the measurement. The KL trigger is independent of this
+and survives.
 
 **Claim discipline.** Every speedup claim must state that it is fitting-time,
 and every comparison must be at matched wall-clock.
@@ -113,9 +128,9 @@ wall time for skipped runs rather than zero, exits nonzero on any failure, and t
 | M1 | Density-estimator dispatch | `fast_diffusion/model/density.py` | histogram / scipy / sklearn, config-driven |
 | M2 | Neumann BCs, 2D | `fast_diffusion/model/kfp.py` | prerequisite for M4 |
 | M3 | Optical flow + warping | `fast_diffusion/model/flow.py` | RAFT via torchvision; forward/backward consistency masks |
-| M4 | ADI operator-split FP solve on (T,H,W) | `fast_diffusion/model/fp_video.py` | batched Thomas; `spsolve` on T*H*W is intractable |
-| M5 | Sequential IS initialiser + ESS keyframing | `fast_diffusion/model/density.py` | replaces per-frame `score_samples` |
-| M6 | Cross-frame Krylov warm starts | `fast_diffusion/model/fp_video.py` | target: 7-11 iterations down to 1-3 on non-keyframes |
+| M4 | Line-relaxation FP solve on (T,H,W) | `fast_diffusion/model/fp_video.py` | batched Thomas; `spsolve` on T*H*W is intractable. Full-diagonal line Gauss-Seidel, not per-factor ADI |
+| M5 | Sequential IS initialiser + KL keyframing | `fast_diffusion/model/density.py` | replaces per-frame `score_samples`; ESS was measured blind and rejected (8.5) |
+| ~~M6~~ | ~~Cross-frame Krylov warm starts~~ | -- | **Removed.** Measured at 1.12x and deleted; see 8.3b |
 | M7 | Score-field storage | `fast_diffusion/model/score_store.py` | ~250 MB per 16-frame 256^2 clip at N=20; needs temporal compression or streaming |
 | M8 | Spatio-temporal backbone | `network/network3d.py` | factorised (2+1)D conv + temporal attention |
 | M9 | Autoregressive conditional sampler | `fast_diffusion/model/sample_video.py` | per-frame weight schedule replacing scalar `conditional_weight`; batched PF-ODE |
@@ -135,11 +150,15 @@ invoke the curse of dimensionality, correctly.
 
 | Axis | Values | Question answered |
 |---|---|---|
-| ESS threshold | 0.1, 0.25, 0.5, 0.75, 1.0 (= always keyframe) | cost vs. flicker tradeoff; headline figure |
+| KL threshold | `kl_factor` sweep, plus 0 (= always keyframe) | cost vs. flicker tradeoff; headline figure |
 | Warp source | RAFT / block matching / identity (no warp) | does motion-aware IS matter, or is reweighting enough |
 | History length L | 1, 2, 4 | how much conditioning context is useful |
-| Warm start | cold / warped-m only / warped-m + Krylov | attributes the speedup to its two sources |
-| Splitting scheme | ADI / Strang / unsplit reference | numerical validation of M4 |
+| Stencil | upwind / central (where central is stable) | the accuracy price of unconditional stability; measured in 8.3c |
+| Grid spacing `dh` | 1.0, 0.5, 0.25 | artificial diffusion is `\|s\|dh/2`, so this is the only lever on it |
+| Relaxation | line Gauss-Seidel / unsplit reference | numerical validation of M4 |
+
+The warm-start ablation (`cold / warped-m only / warped-m + Krylov`) is dropped with
+the mechanism itself; see 8.3b.
 
 `ESS threshold = 1.0` degenerates to per-frame independent solves, which is the
 correct internal baseline: it isolates the contribution of the sequential scheme
@@ -185,13 +204,13 @@ Why this task and not the alternatives:
   regime needs no apology.
 - **The contribution and the metric coincide.** Temporal incoherence inside the
   synthesised region is the standard failure mode of video inpainting, and it is
-  exactly what sequential importance sampling plus cross-frame warm starts
-  address. Warping error measured *inside the mask* is a clean, targeted number.
+  exactly what sequential importance sampling with a KL-triggered keyframe rule
+  addresses. Warping error measured *inside the mask* is a clean, targeted number.
 - **The baselines are fair.** Compare against zero-shot / internal-learning
   methods, where a per-instance fit is the same category. Trained video inpainting
   models can be reported as context, clearly labelled as a different setting
   rather than as a claim.
-- **The ESS trigger acquires physical meaning.** Disocclusion and scene change are
+- **The keyframe trigger acquires physical meaning.** Disocclusion and scene change are
   precisely when the warped proposal fails, so the keyframe rate becomes an
   interpretable quantity rather than a tuning artefact.
 - **Strong visual payoff.** Object removal before/after is exactly the kind of
@@ -217,13 +236,15 @@ on the prior. Not a second contribution, and not a second results section.
 |---|---|
 | ~~Split solve too slow at useful resolutions~~ | **Resolved.** 26.6x over `spsolve`; 3.8 min/clip at 16x64x64. Section 8.3. |
 | ~~Stability constraint `sigma^2 dt <= 0.5`~~ | **Resolved by upwinding.** Margin is exactly 1 for every configuration. Section 8.2. |
-| Upwind numerical diffusion smooths the score field | First-order accuracy is the price of unconditional stability. Ablate upwind vs central wherever central is stable and report the gap; do not present stability as free. |
+| Upwind numerical diffusion smooths the score field | **Measured, section 8.3c.** Order 0.99 vs 2.04; relative added diffusion is exactly `\|s\|h/2`, so ~50% at the shipped `dh=1`, and sigma-independent. Reported as a cost, with `dh` as the documented lever. |
 | Solver cost at 128x128 (18 min/clip) limits the experiment count | Port `thomas_batch` to torch on GPU before the campaign -- 1024-2048 independent lines is an ideal GPU workload. Section 8.3. |
 | 8 GB VRAM caps clip size during training, not just precompute | Budget VRAM for the (2+1)D backbone at 16x64x64 first; use gradient checkpointing or shorter windows at 128x128. |
-| IS weight degeneracy on most real sequences | ESS trigger makes this graceful rather than fatal; report keyframe rate as a result, not a failure |
+| IS weight degeneracy on most real sequences | KL trigger makes this graceful rather than fatal (ESS was measured blind, 8.5); report keyframe rate as a result, not a failure |
 | Flow errors dominate density errors | The identity-warp ablation quantifies this directly |
 | Reviewers read fitting-time speedup as sampling-time speedup | State it in the abstract, the contributions list, and every table caption |
-| "Why not just add a temporal consistency loss?" | The ESS/no-warp ablations must answer this quantitatively |
+| ~~FVD not comparable with published values~~ | **Resolved.** Canonical Kinetics-400 I3D, 400-d pre-softmax features, no substitute backbone available. Section 8.3d. |
+| Temporal path does not beat the per-frame baseline at short training budgets | Real and unresolved: -0.09 dB masked PSNR at 60 epochs, and trivial `copy_prev` beats both by ~10 dB. Expected, since temporal layers start at exactly zero contribution, but it must be shown resolved at the full budget or reported as a negative result. `run_video.py` warns whenever it holds. |
+| "Why not just add a temporal consistency loss?" | The keyframe-trigger and no-warp ablations must answer this quantitatively |
 
 ---
 
@@ -242,10 +263,14 @@ on the prior. Not a second contribution, and not a second results section.
 
 ## 7. Open decisions
 
-- **Dynamic 3D / 4D.** Deferred. Current scope is `T x H x W` video with real
-  object and camera motion. Extending the FP domain to a deforming or
-  unstructured 4D representation (deformable Gaussians, dynamic NeRF) is a
-  separate contribution and should not be attempted in the same paper.
+- ~~**Dynamic 3D / 4D.**~~ **DECIDED: out of scope.** The paper is **2D dynamic
+  video** only -- `T x H x W`, two spatial dimensions plus time, with real object and
+  camera motion. Extending the FP domain to a deforming or unstructured 4D
+  representation (deformable Gaussians, dynamic NeRF) is a separate contribution and
+  will not be attempted here. Wording discipline follows from this: "the 3D operator"
+  in `fp_video` means the three axes of the linear system, two of which are pixel-value
+  axes and one of which is time. Nothing in the paper should let a reader infer
+  volumetric support.
 - ~~**Drift discretisation.**~~ **RESOLVED.** Upwinding is implemented and is the
   default (`diffusion.stencil: upwind`). Settling it required correcting the
   inherited sign convention: expanding a legacy row shows the diffusion term
@@ -323,9 +348,11 @@ sweeps per decade, which makes the inner tolerance the dominant cost knob:
 `diffusion.inner_tolerance` exposes this; the default is 1e-6.
 
 Accuracy trade: upwinding is first-order accurate in space against central
-differencing's second order, adding numerical diffusion of order `|v| h / 2`.
-Ablate upwind against central wherever central is stable, and report the
-difference -- do not present unconditional stability as free.
+differencing's second order, adding numerical diffusion of `|v| h / 2`. **This is now
+measured rather than asserted -- see 8.3c**: observed order 0.99 vs 2.04, the fitted
+artificial diffusion matching `|v|h/2` to four digits, and a relative added diffusion
+of `|s| h / 2` in which sigma cancels entirely. At the shipped `dh = 1` that is about
+50% of the physical diffusion. Do not present unconditional stability as free.
 
 ### 8.3 Feasibility, measured honestly
 
@@ -407,45 +434,148 @@ small kernels. CUDA graph capture of the sweep body is the obvious next step and
 > The same revision claimed 18 min per clip at 16x128x128 on CPU; the measured
 > end-to-end figure is 298.5 s (5.0 min) at `solve_tolerance` 1e-4.
 
-### 8.3b The warm start works, and its benefit is small
+### 8.3b The warm start was measured, and removed
 
-This is the mechanism the paper's speedup claim rests on, so it is measured against a
-cold-start control (`benchmark_warm_start.py`, 4 clips of 8x48x48, N=10):
+The cross-clip score warm start was the mechanism section 1 originally rested its
+speedup claim on. It was measured against a cold-start control (4 clips of 8x48x48,
+N=10):
 
 | setting | clips warm-started | warm iters | cold iters | iteration saving | wall clock |
 |---|---|---|---|---|---|
 | contiguous windows | 2 of 4 | 4.00 | 4.50 | **1.12x** | 1.09x |
 | independent scenes | 0 of 4 | -- | -- | -- | -- |
 
-**Both rows are results and both must be reported.** The second is the trigger
-correctly declining a warm start that would not have helped: with independent scenes
-every clip boundary is a genuine density discontinuity, and the KL statistic separates
-them from within-shot variation by roughly 300x (0.006-0.010 at boundaries vs 2.1e-05
-within shot).
+**It has been removed from the codebase.** 1.12x does not justify a mechanism, its
+config surface, and its correctness caveats. The cause was structural, not a tuning
+failure: upwinding made the fixed-point iteration converge in 4-5 iterations from a
+cold start, so there was almost nothing left to save. The two contributions were in
+direct tension and the more stable solver won -- it consumed the headroom the warm
+start existed to exploit.
 
-The first row is honest but **weak, and it undercuts the framing in section 1**. The
-cause is structural, not a tuning failure: upwinding made the fixed-point iteration
-converge in 4-5 iterations from a cold start, so there is very little left for a warm
-start to save. The two contributions are in direct tension -- the more stable solver
-consumed most of the headroom the warm start was supposed to exploit. Options, in
-order of preference:
+What this costs the paper: nothing that was load-bearing. The efficiency claim now
+rests on the KL-triggered incremental density correction, which measures **7.54x**
+(section 8.5) rather than 1.12x, and the stability result (section 8.2), which is
+independent of both.
 
-1. Re-frame the contribution around **unconditional stability** (margin exactly 1.0
-   for every sigma, N and |s| tested; 12/12 configs converge including sigma=25 at
-   sigma^2 dt = 156, where the previous scheme diverged to 1e+68). This is a strong,
-   clean, well-measured result and does not depend on the warm start at all.
-2. Report the warm start as a **secondary** efficiency result with its measured 1.12x,
-   paired with the trigger's 300x discrimination as the substantive finding.
-3. Look for headroom at tighter `solve_tolerance`, where the cold-start iteration
-   count is higher and there is more to save. Not yet measured.
+What survives from the second row of that table: the trigger correctly declining to
+reuse a proposal across a genuine discontinuity. That behaviour is now reported as
+part of the keyframe trigger in 8.5, where it belongs.
 
-Do not present the warm start as the headline speedup on the strength of 1.12x.
+Recorded here so it is not reintroduced: warm-starting the FP iteration is not a
+promising direction *given* upwinding. It would only pay at much tighter
+`solve_tolerance`, where cold-start iteration counts are high enough to leave
+something to save. That was never measured.
 
-**Known limitation.** `kl_floor = 1e-3` was tuned at 64x64 / T=16 and is
-resolution- and clip-length-dependent: at 48x48 / T=8 it produced one false-positive
-interior keyframe (KL 0.00103, just over the floor) on a clip with no cut. The floor
-should be expressed relative to the within-shot KL scale rather than as an absolute
-constant, or re-tuned per configuration and reported as such.
+### 8.3c Upwinding in space: the benefit and the exact cost
+
+`benchmark_stencil.py`. The discrete operator is applied to a smooth analytic field
+and compared against the exact continuous operator, which isolates truncation error
+without needing an exact PDE solution. Boundary cells are excluded from every norm --
+the Neumann ghost-node folding is first-order by construction, so including them
+would report order 1 for both stencils and hide the difference.
+
+**Observed spatial order** (L2 of the operator error, interior only):
+
+| n | h | cell Peclet | upwind L2 | order | central L2 | order |
+|---|---|---|---|---|---|---|
+| 17 | 0.0625 | 1.000 | 1.02e+01 | -- | 9.22e-01 | -- |
+| 33 | 0.0312 | 0.500 | 5.22e+00 | 0.97 | 2.20e-01 | 2.07 |
+| 65 | 0.0156 | 0.250 | 2.62e+00 | 0.99 | 5.35e-02 | 2.04 |
+| 129 | 0.0078 | 0.125 | 1.31e+00 | 1.00 | 1.32e-02 | 2.02 |
+
+**Upwind 0.99, central 2.04.** Exactly the textbook orders, which is the confirmation
+that the shipped assembly is doing what it claims.
+
+**Artificial diffusion.** The difference between the two operators is the artificial
+diffusion term; least-squares projecting it onto the Laplacian recovers its
+coefficient without assuming the leading-order analysis:
+
+| h | fitted `D_num` | predicted `\|v\|h/2` | ratio | `D_num / D` |
+|---|---|---|---|---|
+| 0.0625 | 2.47e-01 | 2.50e-01 | 0.987 | 0.494 |
+| 0.0312 | 1.25e-01 | 1.25e-01 | 0.997 | 0.249 |
+| 0.0156 | 6.24e-02 | 6.25e-02 | 0.999 | 0.125 |
+| 0.0078 | 3.12e-02 | 3.12e-02 | 1.000 | 0.062 |
+
+The prediction is confirmed to 4 digits at the finest grid. Reducing it to the
+quantities a config actually sets:
+
+```
+D_num / D  =  |v| h / (2 D)  =  |s| h / 2
+```
+
+**`g` cancels, so sigma is irrelevant to the artificial diffusion.** The only levers
+are `diffusion.dh` and the score magnitude. This matters practically: at the shipped
+`dh = 1.0` with a measured score range of order `|s| ~ 1`, the artificial diffusion is
+**~50% of the physical diffusion**. That is not a rounding error and must be stated.
+Halving `dh` halves it, at 4x the solve cost per axis-refinement.
+
+**Stability boundary** (sigma=5, N=20, h=1). Three thresholds that are easy to
+conflate:
+
+| `\|s\|h` | upwind margin | central margin | central solves | central max\|u\| |
+|---|---|---|---|---|
+| 2.0 | 1.0000 | 1.0000 | yes | 7.84e-01 |
+| 2.1 | 1.0000 | 0.8125 | yes | 7.98e-01 |
+| 2.5 | 1.0000 | 0.0625 | yes | 8.53e-01 |
+| 2.6 | 1.0000 | -0.1250 | yes | 8.67e-01 |
+| 3.0 | 1.0000 | -0.8750 | **no** | 1.15e+04 |
+| 25.0 | 1.0000 | -42.1250 | **no** | 1.79e+143 |
+
+1. **M-matrix (sign) condition: `|s|h <= 2`.** Past this an off-diagonal changes sign
+   and the discrete maximum principle is lost, so spurious oscillation becomes
+   possible even while the solve still converges.
+2. **Diagonal dominance: `|s|h ~ 2.53`.** The shared identity term sustains dominance
+   past the sign condition.
+3. **Actual divergence: between 2.6 and 3.0.**
+
+Upwind holds a margin of **exactly 1.0 at every magnitude tested, including
+`|s| = 25`**. Reporting only one of the three central thresholds would misstate where
+central is usable, so all three are given. Note that "central diverges" and "central
+loses its guarantee" are 30% apart in `|s|h`, and the gap is where oscillation lives.
+
+### 8.3d FVD is now comparable with published values
+
+The earlier implementation computed FVD from torchvision's `r3d_18` because the
+canonical Kinetics-400 I3D weights are not redistributable. That was documented as
+non-comparable, which was honest but useless: an FVD that cannot be placed next to
+any published FVD is not a baseline comparison.
+
+Resolved by downloading the canonical weights (`download_assets.py`):
+
+- I3D TorchScript, 51,235,320 bytes, sha256 `bec6519f66ea534e...`, feature width
+  verified at **400** (pre-softmax logits, the layer FVD is defined on).
+- Preprocessing is delegated to the module's own `rescale` / `resize` flags rather
+  than reimplemented, since FVD is as sensitive to preprocessing as to weights.
+- DAVIS 2017 480p trainval, sha256 `e3d0b5b77c3d031b...`, 90 sequences / 6208 frames,
+  which clears `MIN_FVD_SAMPLES = 64` with one clip each.
+
+Validated behaviour: ordering holds across same-process (2.14) < systematically
+shifted (89.78) < heavily corrupted (947.0); identical sets give -7.6e-06.
+
+Guards, each verified to fire: sample count below 64; fewer than 9 frames per clip
+(the I3D temporal stack collapses at T=8 and fails inside the TorchScript
+interpreter); missing weights. **`fvd()` has no backbone parameter at all** -- the
+`r3d_18` path was deleted rather than kept as a fallback, because a non-comparable FVD
+is not a weaker result but a different quantity wearing the same name.
+
+Two bugs found while doing this, both of which would have produced wrong or absent
+numbers on a current install:
+
+- `scipy.linalg.sqrtm` has dropped its `disp` keyword, so the Frechet distance raised
+  `TypeError` outright. Now handles either return convention, with an
+  ill-conditioning offset and a guard that refuses a large imaginary component instead
+  of silently taking the real part.
+- The I3D resize path calls `.view()`, which fails on the non-contiguous tensor a
+  `permute` produces. Fixed with an explicit `.contiguous()`.
+
+**The inpainting comparison now runs on DAVIS with real object masks**
+(`davis_inpaint.yml`, `DavisVideoDataset`). Real masks are irregular, track real
+motion, and vary in coverage from 0.3% to 54.6% across sequences against a synthetic
+box's fixed ~6%. Masks are resized nearest-neighbour, never bicubic: bicubic on a
+DAVIS annotation produces fractional boundary values ranging to `[-0.166, 1.173]`,
+i.e. outside `[0, 1]` entirely, which would put every masked metric on the wrong
+support.
 
 ### 8.4 Density-estimator claims, corrected and re-measured
 
@@ -491,6 +621,26 @@ motion the running median falls to ~1e-6 and a purely relative rule fired 3
 spurious keyframes in a 10-frame no-cut control. With the floor, the cut clip fires
 exactly once at the cut (KL 0.0077 vs ~0.00005 within-shot, ~150x) and the control
 fires only on frame 0. ESS is retained and reported as a diagnostic.
+
+**Re-measured on the current code** (`benchmark_keyframe_trigger.py`, 24 frames at
+64x64, cut at frame 12), reporting cost, discrimination and false positives
+separately, because a trigger needs all three and the earlier ESS design passed two of
+them trivially while failing the third completely:
+
+| property | measurement |
+|---|---|
+| cost: incremental correction vs full re-estimate | 3.3 ms vs 24.5 ms per frame = **7.54x** |
+| discrimination: KL at cut vs mean within-shot | 3.35e-02 vs 9.89e-07 = **33931x** |
+| discrimination: KL at cut vs *worst* within-shot frame | 3.35e-02 vs 1.29e-05 = **2591x** |
+| false positives on a no-cut control | **0** in 23 frames |
+| detection | fires exactly once, at frame 12 |
+| ESS on the same sequence | 0.871 at cut vs 1.000 within shot = **0.871x** |
+
+The 7.54x is the paper's efficiency result. It replaces the 1.12x warm start (8.3b),
+and unlike that mechanism it is not in tension with the solver work.
+
+The ESS row is included deliberately: it is the originally proposed trigger, measured
+on the identical sequence, moving by 13% where KL moves by five orders of magnitude.
 
 **A limitation to state in the paper.** Pixel-value pairs are a *global* statistic,
 insensitive to purely spatial rearrangement. A cut that changes layout while

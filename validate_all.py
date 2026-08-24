@@ -4,10 +4,13 @@ Run this after any change to the solver, the estimator, the masked sampler or th
 metrics. It is fast (no training) and it is the gate that catches the class of defect
 that produces plausible numbers rather than errors.
 """
+import os
+
 import numpy as np
 import torch
 
 FAILURES = []
+SKIPPED = []
 
 
 def check(name, fn):
@@ -17,6 +20,21 @@ def check(name, fn):
     except Exception as e:
         print(f"  FAIL  {name}: {type(e).__name__}: {e}")
         FAILURES.append(name)
+
+
+def check_if(name, fn, available, why):
+    """Run a check only when its prerequisite assets are present.
+
+    The evaluation assets (I3D weights, DAVIS) are gitignored and total 1.6 GB, so
+    these checks cannot be unconditional. They are reported as SKIP rather than
+    silently omitted, because a suite that quietly shrinks when data is missing is how
+    an untested path reaches a paper.
+    """
+    if not available:
+        print(f"  SKIP  {name}  ({why})")
+        SKIPPED.append(name)
+        return
+    check(name, fn)
 
 
 print("=" * 74)
@@ -251,8 +269,82 @@ check("temporal path is inert at init (frame-equivariance)",
 
 print()
 print("=" * 74)
+print("6. FVD is on the canonical I3D features (needs assets/)")
+print("=" * 74)
+
+I3D_PATH = os.path.join("assets", "i3d_torchscript.pt")
+DAVIS_ROOT = os.path.join("assets", "DAVIS")
+
+
+def fvd_uses_400d_i3d_and_refuses_substitutes():
+    """FVD must be the published quantity, or it must refuse to produce a number."""
+    from fast_diffusion.model import evaluate_video as ev
+    import inspect
+
+    feats = ev.i3d_features(np.random.rand(2, 9, 3, 32, 32).astype(np.float32))
+    assert feats.shape == (2, 400), f"expected 400-d I3D logits, got {feats.shape}"
+
+    # No backbone escape hatch may exist: a substitute backbone silently produces a
+    # number on a different scale that looks equally plausible.
+    assert "backbone" not in inspect.signature(ev.fvd).parameters, (
+        "fvd() accepts a backbone argument again; a non-comparable FVD is a different "
+        "quantity wearing the same name"
+    )
+
+    # Missing weights must raise, not fall back.
+    try:
+        ev.load_i3d(weights=os.path.join("assets", "definitely_absent.pt"))
+        raise AssertionError("load_i3d silently proceeded without canonical weights")
+    except FileNotFoundError:
+        pass
+
+    # T < 9 must be caught up front rather than inside the TorchScript interpreter.
+    try:
+        ev.i3d_features(np.random.rand(1, 8, 3, 32, 32).astype(np.float32))
+        raise AssertionError("accepted T=8, below the I3D minimum")
+    except ValueError:
+        pass
+
+    print(f"        I3D feature width 400, no backbone parameter, guards fire")
+
+
+check_if("FVD on 400-d canonical I3D, no substitute path",
+         fvd_uses_400d_i3d_and_refuses_substitutes,
+         os.path.isfile(I3D_PATH),
+         f"{I3D_PATH} absent; run python download_assets.py --only i3d")
+
+
+def davis_masks_are_binary_and_real():
+    """Real object masks must stay exact indicators through the resize."""
+    from data.VideoDataset import DavisVideoDataset
+
+    ds = DavisVideoDataset(root=DAVIS_ROOT, split="all", clip_len=9, image_res=32,
+                           n_clips=4)
+    vals = set(torch.unique(ds._masks).tolist())
+    assert vals <= {0.0, 1.0}, (
+        f"DAVIS masks are not binary ({sorted(vals)[:6]}); a bicubic resize would do "
+        "this and would put every masked metric on the wrong support"
+    )
+    rep = ds.mask_report()
+    assert rep["coverage_mean"] > 0, "all DAVIS masks are empty"
+    assert ds.real_mask(0).shape == (9, 1, 32, 32), ds.real_mask(0).shape
+    print(f"        {rep['n_clips']} clips, coverage "
+          f"{rep['coverage_min']:.3f}-{rep['coverage_max']:.3f}, masks in {{0, 1}}")
+
+
+check_if("DAVIS real masks load as exact binary indicators",
+         davis_masks_are_binary_and_real,
+         os.path.isdir(os.path.join(DAVIS_ROOT, "JPEGImages", "480p")),
+         f"{DAVIS_ROOT} absent; run python download_assets.py --only davis")
+
+print()
+print("=" * 74)
 if FAILURES:
     print(f"{len(FAILURES)} CHECK(S) FAILED: {', '.join(FAILURES)}")
     raise SystemExit(1)
-print("ALL CHECKS PASSED")
+if SKIPPED:
+    print(f"ALL CHECKS PASSED ({len(SKIPPED)} skipped for missing assets: "
+          f"{', '.join(SKIPPED)})")
+else:
+    print("ALL CHECKS PASSED")
 print("=" * 74)

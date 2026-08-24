@@ -152,17 +152,18 @@ class SyntheticVideoDataset(VideoDataset):
     trigger should detect. Use this as the controlled validation case.
 
     `contiguous` controls whether successive clips are the same scene continuing, or
-    independent scenes. This distinction decides whether cross-clip score warm starts
-    are meaningful at all, so it is not a cosmetic option:
+    independent scenes. This decides whether the sequential density estimator's running
+    grid stays valid across a clip boundary, so it is not a cosmetic option:
 
     contiguous=False (default)
         Each clip resamples its pattern and colours, so clip k has nothing to do with
-        clip k-1. The keyframe trigger correctly fires at every clip boundary and warm
-        starts are correctly declined. This is the negative control.
+        clip k-1. The KL trigger fires at every clip boundary and the density grid is
+        correctly rebuilt from scratch. This is the negative control.
     contiguous=True
         One long sequence chopped into consecutive windows: clip k starts where clip
-        k-1 ended, with the same pattern and continuing motion. Warm starts apply, and
-        this is the setting in which their benefit can be measured.
+        k-1 ended, with the same pattern and continuing motion. The estimator's
+        importance correction remains valid across boundaries, which is the regime its
+        7.54x cost saving is measured in (`benchmark_keyframe_trigger.py`).
     """
 
     def __init__(self, velocity=(1.5, 0.75), scene_cut_at=None, contiguous=False,
@@ -241,11 +242,217 @@ class SyntheticVideoDataset(VideoDataset):
         return flow
 
 
+class DavisVideoDataset(VideoDataset):
+    """DAVIS 2017 sequences with their real per-object segmentation masks.
+
+    This is the dataset the inpainting comparison is meant to run on. Synthetic boxes
+    and strokes (`inpaint.make_mask`) are useful for controlled ablations, but they
+    make the task easier in a way that is hard to quantify: a box has straight edges,
+    a fixed area and motion the model can extrapolate. DAVIS masks are irregular,
+    track real objects, change area as objects rotate and occlude, and are what the
+    video-inpainting literature reports on. 90 sequences also clears the FVD
+    sample-count floor of 64 with one clip each.
+
+    Layout expected under `root` (as unpacked by `download_assets.py`):
+
+        JPEGImages/480p/<sequence>/00000.jpg ...
+        Annotations/480p/<sequence>/00000.png ...
+        ImageSets/2017/{train,val}.txt
+
+    Masks are palette PNGs whose pixel value is the object id, 0 being background.
+    DAVIS 2016-style binary annotations (0/255) are handled by the same code path
+    since they are just the single-object case.
+
+    Two things here are easy to get wrong and are done deliberately:
+
+    * **Masks are resized with nearest-neighbour, never bicubic.** The frame
+      transform uses bicubic, which is correct for images and wrong for masks: it
+      produces fractional values along every boundary, so a mask that should be a
+      hard 0/1 indicator becomes a soft one and the "known" region silently bleeds
+      into the hole. Every masked metric would then be computed over the wrong
+      support.
+    * **Masks are not min/max normalised.** The base class normalises clips as a
+      whole, which is right for pixels and meaningless for an indicator, so masks are
+      kept out of `self.data` entirely.
+
+    Parameters
+    ----------
+    root : DAVIS root directory.
+    split : 'train', 'val' or 'all' -- which ImageSets list to read.
+    year : '2017' or '2016', selecting the ImageSets subdirectory.
+    objects : 'all' (union of every annotated object, the default), 'largest' (the
+        single object with the greatest total area), or an int object id.
+    mask_dilate : radius in pixels to grow the mask by. Video-inpainting papers
+        commonly dilate, because an exactly-tight mask leaves a rim of the object's
+        own colour just outside the hole which a method can copy from and appear to
+        succeed. Default 0, so the choice is explicit rather than baked in.
+    clip_start : first frame index within each sequence.
+    min_coverage : sequences whose mask covers less than this fraction of the clip on
+        average are skipped, which catches a sequence whose object leaves frame and,
+        more usefully, an annotation directory that failed to load at all.
+    """
+
+    def __init__(self, root, split="all", year="2017", objects="all",
+                 mask_dilate=0, clip_start=0, min_coverage=1e-4, **kwargs):
+        self.root = root
+        self.split = split
+        self.year = str(year)
+        self.objects = objects
+        self.mask_dilate = int(mask_dilate)
+        self.clip_start = int(clip_start)
+        self.min_coverage = float(min_coverage)
+        self._masks = []
+        self._sequences = []
+        self.skipped = []
+        super().__init__(**kwargs)
+        # `load_clips` fills `_masks` in the same order it returns clips; the base
+        # class then truncates the clips to n_clips, so the masks must follow.
+        self._masks = torch.stack(self._masks[: self.n_data])
+        self._sequences = self._sequences[: self.n_data]
+
+    def _sequence_names(self):
+        if self.split == "all":
+            names = sorted(os.listdir(os.path.join(self.root, "JPEGImages", "480p")))
+            return [n for n in names
+                    if os.path.isdir(os.path.join(self.root, "JPEGImages", "480p", n))]
+
+        list_path = os.path.join(self.root, "ImageSets", self.year, f"{self.split}.txt")
+        if not os.path.isfile(list_path):
+            raise FileNotFoundError(
+                f"DAVIS split list not found at {list_path!r}. Expected one of "
+                f"'train', 'val' or 'all' for split, and a year with an ImageSets "
+                f"directory."
+            )
+        with open(list_path, encoding="utf-8") as fh:
+            return [ln.strip() for ln in fh if ln.strip()]
+
+    def _load_mask(self, path, out_res):
+        """One annotation PNG -> (1, H, W) float32 indicator, nearest-resized."""
+        from PIL import Image
+
+        ann = np.array(Image.open(path))
+        if ann.ndim == 3:            # some tools save the palette expanded to RGB
+            ann = ann[..., 0]
+
+        ids = [int(v) for v in np.unique(ann) if v != 0]
+        if not ids:
+            sel = np.zeros_like(ann, dtype=bool)
+        elif self.objects == "all":
+            sel = ann != 0
+        elif self.objects == "largest":
+            areas = {i: int((ann == i).sum()) for i in ids}
+            sel = ann == max(areas, key=areas.get)
+        elif isinstance(self.objects, int):
+            sel = ann == self.objects
+        else:
+            raise ValueError(
+                f"objects must be 'all', 'largest' or an int id; got {self.objects!r}"
+            )
+
+        m = torch.from_numpy(sel.astype(np.float32))[None, None]  # (1,1,H,W)
+        m = torch.nn.functional.interpolate(
+            m, size=(out_res, out_res), mode="nearest")
+        return m[0]
+
+    def load_clips(self):
+        from PIL import Image
+
+        jpeg_root = os.path.join(self.root, "JPEGImages", "480p")
+        ann_root = os.path.join(self.root, "Annotations", "480p")
+        if not os.path.isdir(jpeg_root):
+            raise FileNotFoundError(
+                f"DAVIS frames not found at {jpeg_root!r}. Fetch and unpack the "
+                "dataset with `python download_assets.py --only davis`."
+            )
+
+        need = self.clip_len * self.stride + self.clip_start
+        clips = []
+
+        for seq in self._sequence_names():
+            frame_dir = os.path.join(jpeg_root, seq)
+            ann_dir = os.path.join(ann_root, seq)
+            if not os.path.isdir(frame_dir) or not os.path.isdir(ann_dir):
+                self.skipped.append((seq, "missing frames or annotations"))
+                continue
+
+            files = sorted(f for f in os.listdir(frame_dir)
+                           if os.path.splitext(f)[1].lower() in _IMAGE_EXTS)
+            if len(files) < need:
+                self.skipped.append(
+                    (seq, f"only {len(files)} frames, need {need}"))
+                continue
+
+            picked = files[self.clip_start::self.stride][: self.clip_len]
+
+            frames, masks = [], []
+            for f in picked:
+                frames.append(self.transform(
+                    Image.open(os.path.join(frame_dir, f)).convert("RGB")))
+                stem = os.path.splitext(f)[0]
+                ann_path = os.path.join(ann_dir, stem + ".png")
+                if not os.path.isfile(ann_path):
+                    masks = []
+                    break
+                masks.append(self._load_mask(ann_path, self.image_res))
+
+            if len(masks) != len(picked):
+                self.skipped.append((seq, "annotation frame missing"))
+                continue
+
+            mask = torch.stack(masks)                  # (T, 1, H, W)
+            coverage = float(mask.mean())
+            if coverage < self.min_coverage:
+                self.skipped.append((seq, f"mask coverage {coverage:.2e} too low"))
+                continue
+
+            if self.mask_dilate > 0:
+                from fast_diffusion.model.inpaint import dilate_mask
+                mask = torch.as_tensor(
+                    dilate_mask(mask.numpy(), radius=self.mask_dilate),
+                    dtype=torch.float32)
+
+            clips.append(torch.stack(frames))
+            self._masks.append(mask)
+            self._sequences.append(seq)
+
+        return clips
+
+    def real_mask(self, idx):
+        """Real object mask for clip `idx`, (T, 1, H, W) with 1 = hole.
+
+        Same convention as `inpaint.make_mask`, so this drops straight into
+        `pf_ode_inpaint` in place of a synthetic mask.
+        """
+        return self._masks[idx]
+
+    def sequence_name(self, idx):
+        return self._sequences[idx]
+
+    def mask_report(self):
+        """Per-clip mask coverage, plus which sequences were skipped and why.
+
+        Coverage belongs next to any inpainting number: masked PSNR over a 2% hole
+        and over a 30% hole are not remotely the same task.
+        """
+        cov = [float(m.mean()) for m in self._masks]
+        return {
+            "n_clips": len(cov),
+            "sequences": list(self._sequences),
+            "coverage_mean": float(np.mean(cov)) if cov else 0.0,
+            "coverage_min": float(np.min(cov)) if cov else 0.0,
+            "coverage_max": float(np.max(cov)) if cov else 0.0,
+            "per_clip_coverage": cov,
+            "n_skipped": len(self.skipped),
+            "skipped": self.skipped,
+        }
+
+
 def get_video_dataset(config):
     """Build a video dataset from a run config.
 
     Reads `data_loader.{dataset, image_size, clip_len, num_clips, seed, stride,
-    root, paths, scene_cut_at, velocity, contiguous}`.
+    root, paths, scene_cut_at, velocity, contiguous, split, year, objects,
+    mask_dilate, clip_start}`.
     """
     dl = config["data_loader"]
     kind = dl.get("dataset", "synthetic")
@@ -271,7 +478,18 @@ def get_video_dataset(config):
         return FileVideoDataset(
             paths=dl["paths"], start_frame=dl.get("start_frame", 0), **common
         )
+    if kind == "davis":
+        return DavisVideoDataset(
+            root=dl.get("root", os.path.join("assets", "DAVIS")),
+            split=dl.get("split", "all"),
+            year=dl.get("year", "2017"),
+            objects=dl.get("objects", "all"),
+            mask_dilate=dl.get("mask_dilate", 0),
+            clip_start=dl.get("clip_start", 0),
+            **common,
+        )
 
     raise NotImplementedError(
-        f"video dataset {kind!r} is not supported; expected 'synthetic', 'folder' or 'video'"
+        f"video dataset {kind!r} is not supported; expected 'synthetic', 'folder', "
+        "'video' or 'davis'"
     )

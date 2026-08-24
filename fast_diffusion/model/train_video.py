@@ -11,12 +11,24 @@ distribution learning -- with three differences that matter:
    than something the network has to infer.
 2. Clips are indexed by a clip embedding and frames by a frame embedding, so one
    network holds several clips exactly as the image path holds several images.
-3. Warm starts. Successive clips are similar, so each clip's fixed-point iteration
-   starts from the previous clip's converged score field. `SequentialDensityEstimator`
-   decides when that is no longer safe and a keyframe is needed. This is where the
-   paper's speedup comes from, so `score_precompute` records the per-clip iteration
-   counts with and without the warm start when `measure_warm_start=True` -- a claimed
-   speedup with no such measurement is not a result.
+3. The initial log-density is produced by `SequentialDensityEstimator`, which carries
+   a running density grid across frames and applies an importance correction rather
+   than re-estimating from scratch, re-estimating only when its KL statistic says the
+   content has changed. That is the sequential-importance-sampling contribution.
+
+Removed: cross-clip score warm starts
+-------------------------------------
+An earlier revision started each clip's fixed-point iteration from the previous
+clip's converged score field. It is gone, and the reason is worth recording so it is
+not reintroduced. Measured against a cold-start control it saved 1.12x in iterations
+(4.00 vs 4.50) -- because upwinding already converges in 4-5 iterations from a cold
+start, there was almost nothing left to save. The stability work consumed the headroom
+the warm start was meant to exploit, and carrying a whole mechanism, its config
+surface and its correctness caveats for 12% was not worth it.
+
+The KL keyframe trigger *survives* this removal: it still governs whether the density
+estimator corrects its running grid or re-estimates it, which is a separate and
+load-bearing mechanism.
 
 Score fields are large: (N, C, T, H, W) float32 at N=20, C=3, T=16, H=W=128 is 2.0 GB
 per clip. `score_store` handles that; this module hands it the array and does not
@@ -63,9 +75,8 @@ def _select_backend(config, device):
     return "torch" if size >= 96 else "numpy"
 
 
-def score_precompute(config, dataset, save_folder=None, device=None,
-                     measure_warm_start=False):
-    """Solve the FP equation for every clip, warm-starting from the previous clip.
+def score_precompute(config, dataset, save_folder=None, device=None):
+    """Solve the FP equation for every clip.
 
     The initial condition is built exactly as the image path builds it
     (`kfp.image_channel_to_samples` + `estimate_log_density`), so the solver's domain
@@ -77,6 +88,9 @@ def score_precompute(config, dataset, save_folder=None, device=None,
     estimator across channels would interleave three unrelated density sequences into
     one running grid and one KL history, so its keyframe decisions would be driven by
     channel switches rather than by scene changes.
+
+    Each clip's fixed-point iteration starts cold. Warm-starting it from the previous
+    clip was measured at 1.12x and removed; see the module docstring.
 
     Returns
     -------
@@ -101,7 +115,6 @@ def score_precompute(config, dataset, save_folder=None, device=None,
 
     per_clip = []
     scores = None
-    warm = None
 
     for idx in range(n_clips):
         clip = np.asarray(dataset[idx], dtype=np.float64)  # (T, C, H, W)
@@ -121,38 +134,11 @@ def score_precompute(config, dataset, save_folder=None, device=None,
                     keyframes.append(bool(est_info["keyframe"]))
                     kls.append(float(est_info["kl"]))
 
-        # Which keyframes matter for the warm-start decision.
-        #
-        # Frame 0 of clip 0 is *always* a keyframe -- there is no prior grid to
-        # correct -- so treating any keyframe as disqualifying would disable warm
-        # starts on the very first clip and then, because each clip boundary is itself
-        # a density discontinuity when clips are independent scenes, on every clip
-        # after it. That is exactly what happened before this was separated out: warm
-        # starts never once engaged and the mechanism went unmeasured.
-        #
-        # A keyframe at frame 0 of a later clip is a genuine signal that the clip
-        # boundary is a cut, and it does disqualify the warm start. Keyframes strictly
-        # inside the clip mean the content changed mid-clip and also disqualify it.
-        bootstrap = (idx == 0)
-        boundary_keyframe = keyframes[0] if keyframes else False
-        interior_keyframes = [i for i, k in enumerate(keyframes) if k and i > 0]
-
-        use_warm = (
-            warm is not None
-            and not interior_keyframes
-            and not (boundary_keyframe and not bootstrap)
-        )
-
         t0 = time.perf_counter()
         if backend == "torch":
-            sc, solve_info = compute_scores_clip_torch(
-                config, initial_m, warm_start_scores=warm if use_warm else None,
-                device=device,
-            )
+            sc, solve_info = compute_scores_clip_torch(config, initial_m, device=device)
         else:
-            sc, solve_info = compute_scores_clip(
-                config, initial_m, warm_start_scores=warm if use_warm else None,
-            )
+            sc, solve_info = compute_scores_clip(config, initial_m)
         elapsed = time.perf_counter() - t0
 
         record = {
@@ -160,26 +146,17 @@ def score_precompute(config, dataset, save_folder=None, device=None,
             "iterations": solve_info["iterations"],
             "converged": bool(solve_info["converged"]),
             "seconds": elapsed,
-            "warm_started": bool(use_warm),
+            # Frame 0 of clip 0 is always a keyframe: there is no prior grid to
+            # correct. Later frame-0 keyframes mean the clip boundary is a genuine
+            # content change; interior ones mean it changed mid-clip.
             "keyframe_frames": [i for i, k in enumerate(keyframes) if k],
-            "boundary_keyframe": bool(boundary_keyframe),
-            "interior_keyframes": interior_keyframes,
+            "boundary_keyframe": bool(keyframes[0]) if keyframes else False,
+            "interior_keyframes": [i for i, k in enumerate(keyframes) if k and i > 0],
             "kl_max": max((k for k in kls if np.isfinite(k)), default=None),
             "backend": backend,
         }
 
-        # The cold-start control. Without it the warm-start speedup is an assertion.
-        if measure_warm_start and use_warm:
-            t0 = time.perf_counter()
-            if backend == "torch":
-                _, cold = compute_scores_clip_torch(config, initial_m, device=device)
-            else:
-                _, cold = compute_scores_clip(config, initial_m)
-            record["cold_iterations"] = cold["iterations"]
-            record["cold_seconds"] = time.perf_counter() - t0
-
         per_clip.append(record)
-        warm = sc
 
         if scores is None:
             scores = np.empty((n_clips,) + sc.shape, dtype=np.float32)
@@ -275,7 +252,7 @@ def diffuse_train_video(model, dataset, scores, config, save_folder, device=None
     return time.time() - t_start, {"losses": losses}
 
 
-def train_video(config, save_folder, device=None, measure_warm_start=False):
+def train_video(config, save_folder, device=None):
     """Full video pipeline: dataset -> score precompute -> fit -> save."""
     from data.VideoDataset import get_video_dataset
     from network.network3d import VideoNet
@@ -289,19 +266,14 @@ def train_video(config, save_folder, device=None, measure_warm_start=False):
 
     print(f"precomputing scores for {len(dataset)} clip(s) on {device}")
     t0 = time.time()
-    scores, score_info = score_precompute(
-        config, dataset, save_folder, device, measure_warm_start)
+    scores, score_info = score_precompute(config, dataset, save_folder, device)
     fp_time = time.time() - t0
 
     iters = [r["iterations"] for r in score_info["per_clip"]]
+    keys = sum(len(r["keyframe_frames"]) for r in score_info["per_clip"])
     print(f"  {fp_time:.1f}s total, iterations per clip: {iters}")
-    if measure_warm_start:
-        warm = [r for r in score_info["per_clip"] if "cold_iterations" in r]
-        if warm:
-            w = np.mean([r["iterations"] for r in warm])
-            c = np.mean([r["cold_iterations"] for r in warm])
-            print(f"  warm start: {w:.2f} vs cold {c:.2f} iterations "
-                  f"({c/max(w,1e-9):.2f}x fewer)")
+    print(f"  keyframes: {keys} full re-estimates over "
+          f"{score_info['frames_seen_per_channel'][0]} frames")
 
     model = VideoNet(config)
     n_params = sum(p.numel() for p in model.parameters())

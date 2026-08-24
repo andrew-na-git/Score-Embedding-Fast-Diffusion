@@ -1,0 +1,100 @@
+# DAVIS 2017 video inpainting: real footage, real object masks.
+#
+# This is the config the headline inpainting comparison should run on. The synthetic
+# configs (synth_inpaint.yml and friends) exist for controlled ablations where the
+# flow field is known exactly; this one exists because a result on procedural blobs
+# with a rectangular hole is not evidence about video inpainting.
+#
+# What makes it an apples-to-apples comparison:
+#   * masks are DAVIS's own per-object segmentations -- irregular, tracking real
+#     motion, with coverage varying 0.3%-55% across sequences rather than a fixed 6%
+#   * 70 clips of 16 frames clears both metric floors: MIN_FVD_SAMPLES=64 and the
+#     I3D minimum of 9 frames per clip
+#   * FVD is computed on the canonical Kinetics-400 I3D features, so the number is on
+#     the same scale as published FVD
+#
+# Prerequisite:
+#   python download_assets.py           # fetches I3D weights + DAVIS 2017 480p
+#
+# Report masked metrics, never whole-frame ones. At the mean coverage of ~12% a
+# whole-frame PSNR is inflated by about -10*log10(0.12) = 9.2 dB of untouched pixels.
+
+name: davis_inpaint
+
+data_loader:
+  dataset: davis
+  root: assets/DAVIS
+  # 'all' uses every sequence with annotations (90). Use 'val' (30) for a held-out
+  # split, but note that this is a per-instance fitting regime, not distribution
+  # learning -- the split is about reporting convention, not about generalisation.
+  split: all
+  year: '2017'
+  # 'all' removes every annotated object, 'largest' just the dominant one. 'all' is
+  # the harder and more standard object-removal task.
+  objects: all
+  # A tight mask leaves a rim of the object's own colour immediately outside the
+  # hole, which a method can copy from and score well without having reconstructed
+  # anything. Dilating by 2 px removes that shortcut.
+  mask_dilate: 2
+  clip_start: 0
+  image_size: 64
+  clip_len: 16
+  num_clips: 70
+  stride: 1
+  seed: 9
+
+diffusion:
+  num_timesteps: 20
+  sigma: 5.0
+  dh: 1.0
+  # Upwind is not a free choice: it is first-order in space and adds artificial
+  # diffusion of |s|*dh/2 relative to the physical diffusion, but central differencing
+  # loses the M-matrix property at |s|*dh > 2 and diverges outright by |s|*dh ~ 3.
+  # See benchmark_stencil.py for the measured order (0.99 vs 2.04) and boundary.
+  stencil: upwind
+  solve_tolerance: 1.0e-4
+  max_fp_iterations: 100
+  inner_tolerance: 1.0e-6
+  max_inner_sweeps: 100
+  backend: auto
+  density_method: kde
+  estimator:
+    grid_size: 64
+    kl_threshold: 3.0
+    threshold_mode: mad
+    warmup: 3
+
+model:
+  channels: [32, 64, 128, 128]
+  embed_dim: 128
+  clip_embed_dim: 64
+  frame_embed_dim: 64
+  temporal_mode: factorised
+  # Temporal layers are zero-initialised, so the network starts exactly equal to a
+  # per-frame model and has to earn any temporal contribution. That is the point of
+  # the ablation, and it also means short training budgets will not show a temporal
+  # win -- see the note in PLAN.md 8.3.
+  zero_init_temporal: true
+
+training:
+  n_epochs: 300
+  batch_size: 4
+  lr: 1.0e-4
+  timestep_multiplier: 1.0
+
+sampling:
+  n_steps: 200
+  eps: 1.0e-3
+  known_noise: fixed
+  window: 4
+  overlap: 1
+
+evaluation:
+  # Real object masks come from the dataset, so no synthetic mask is generated.
+  mask_kind: dataset
+  flow_method: blockmatch
+  with_lpips: false
+  compute_fvd: true
+
+misc:
+  eps: 1.0e-5

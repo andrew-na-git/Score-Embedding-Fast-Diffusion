@@ -179,6 +179,71 @@ Each run produces:
 - `saves/<name>/convergence_log.csv` — per-iteration FP residual history
 - `saves/<name>/report.pdf` — summary with loss curves and generated samples
 
+## Video extension (2D dynamic video)
+
+An extension of the same score-precomputation idea from single images to **2D dynamic
+video** is under development for an invited Eurographics full paper. See `PLAN.md` for
+the plan and the measured results.
+
+**Scope.** The domain is `T x H x W`: two spatial dimensions plus time. Dynamic 3D and
+4D representations (deformable Gaussians, dynamic NeRF) are explicitly *out* of scope.
+Where the code says "3D" it means the number of axes in the linear system or the use
+of `Conv3d`, never volumetric data — the FP grid is (time, value, value), and two of
+those axes are pixel-*value* axes rather than spatial ones.
+
+The regime is unchanged from the image path: this is **per-instance score
+precomputation and fitting**, not learning a data distribution. Scores are solved per
+clip and the network is indexed by a clip identity embedding. Reported quality is
+against the fitted clips, and speedups are in fitting wall-clock, not sampling.
+
+### What is measured
+
+| result | measurement | script |
+|---|---|---|
+| Unconditional stability from upwinding | dominance margin exactly 1.0 for every `sigma`, `N`, `\|s\|` tested | `validate_all.py` |
+| Spatial order, upwind vs central | 0.99 vs 2.04 | `benchmark_stencil.py` |
+| Artificial diffusion from upwinding | `\|s\|h/2` relative to physical, confirmed to 4 digits; ~50% at the shipped `dh=1` | `benchmark_stencil.py` |
+| Central-difference limits | M-matrix to `\|s\|h<=2`, converges to ~2.6, diverges by 3.0 | `benchmark_stencil.py` |
+| KL keyframe trigger: cost | 7.54x cheaper per frame than full re-estimation | `benchmark_keyframe_trigger.py` |
+| KL keyframe trigger: discrimination | 2591x vs the worst within-shot frame; 0 false positives in 23 control frames | `benchmark_keyframe_trigger.py` |
+| GPU solver speedup (end to end) | 0.36x at 8x32x32, 1.36x at 16x64x64, 5.36x at 16x128x128 | `benchmark_solver.py` |
+
+Two things deliberately reported as negatives rather than omitted: the cross-clip
+score warm start measured only 1.12x and was **removed**, and the temporal path does
+not yet beat a per-frame baseline at short training budgets (-0.09 dB masked PSNR at
+60 epochs, with a trivial `copy_prev` baseline ahead of both). `run_video.py` prints a
+warning whenever the latter holds. See `PLAN.md` §8.3b and §8.3.
+
+### Getting the evaluation assets
+
+FVD is only comparable with published numbers when computed on the canonical
+Kinetics-400 I3D features, and those weights are not redistributable with this repo.
+`fvd()` therefore **raises** if they are absent rather than substituting another
+backbone — a non-comparable FVD is a different quantity with the same name, not a
+weaker result.
+
+```bash
+python download_assets.py              # I3D weights + DAVIS 2017 480p (~1.6 GB)
+python download_assets.py --only i3d   # weights alone (~51 MB)
+```
+
+Both are checksummed and functionally verified on download (the I3D check asserts a
+400-d feature width). `assets/` is gitignored.
+
+### Running the video pipeline
+
+```bash
+# Synthetic clips: exact known flow and a controllable scene cut, no download needed.
+python run_video.py --config synth_inpaint.yml
+
+# DAVIS 2017 with real per-object masks. This is the headline comparison.
+python run_video.py --config davis_inpaint.yml
+```
+
+Inpainting quality is reported **inside the mask**, with mask coverage alongside it. A
+whole-frame PSNR on a masked task is inflated by roughly `-10*log10(coverage)` — about
+9 dB at DAVIS's mean 12% coverage — because most of the frame was never modified.
+
 ## License
 
 All source code is made available under a BSD 3-clause license. You can freely

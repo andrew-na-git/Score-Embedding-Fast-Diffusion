@@ -1,0 +1,29 @@
+{
+  "frames": 24,
+  "res": 64,
+  "cut_at": 12,
+  "cost": {
+    "incremental_ms": 3.2549347860090756,
+    "full_ms": 24.54867391118213,
+    "speedup": 7.541986406824951,
+    "keyframes": 1
+  },
+  "discrimination": {
+    "kl_at_cut": 0.03354182082754714,
+    "kl_within_mean": 9.885330658333742e-07,
+    "kl_within_max": 1.294529115807323e-05,
+    "kl_ratio_mean": 33930.904273060405,
+    "kl_ratio_max": 2591.0441424586306,
+    "ess_at_cut": 0.8710314716666273,
+    "ess_within_mean": 0.9999990580329662,
+    "ess_ratio": 0.871032292150332
+  },
+  "false_positives": {
+    "control_false_positives": [],
+    "control_frames": 23,
+    "cut_fired_at": [
+      12
+    ],
+    "cut_detected": true
+  }
+}

@@ -4,9 +4,142 @@ All work extending the image-based score-precomputation pipeline to video, for t
 Eurographics full-paper submission. Newest first.
 
 Every measured number below was produced by a script in this repository and can be
-regenerated: `benchmark_solver.py`, `benchmark_warm_start.py`, `benchmark_density.py`,
-`run_video.py`. Where an earlier claim was found to be wrong it is listed under
-**Corrections** with the corrected value, rather than quietly replaced.
+regenerated: `benchmark_solver.py`, `benchmark_stencil.py`,
+`benchmark_keyframe_trigger.py`, `benchmark_density.py`, `run_video.py`. Where an
+earlier claim was found to be wrong it is listed under **Corrections** with the
+corrected value, rather than quietly replaced.
+
+---
+
+## Scope fixed to 2D dynamic video; warm start removed; FVD made comparable
+
+### Removed
+
+* **The cross-clip score warm start is gone** -- `compute_scores_clip`,
+  `compute_scores_clip_torch`, `score_precompute`, `train_video`, `run_video.py`
+  (`--measure-warm-start`) and `benchmark_warm_start.py`. It measured **1.12x** against
+  a cold-start control (4.00 vs 4.50 iterations), which does not justify a mechanism,
+  its config surface and its correctness caveats.
+
+  The cause was structural, not a tuning failure: upwinding already converges in 4-5
+  iterations from cold, so the stability work had consumed the headroom the warm start
+  existed to exploit. The two contributions were in direct tension and the solver won.
+  Recorded in the `train_video` module docstring and PLAN.md 8.3b so it is not
+  reintroduced. **The KL keyframe trigger is independent of this and survives.**
+
+* **The `r3d_18` FVD backend is gone.** `fvd()` no longer takes a `backbone` argument
+  at all. It had a latent `KeyError: 'mean'` on
+  `weights.transforms.keywords["mean"]` and had never actually been executed. Rather
+  than fix a path whose output cannot be compared with any published number, the path
+  was deleted: a non-comparable FVD is not a weaker result but a different quantity
+  wearing the same name.
+
+### Added
+
+* **`benchmark_keyframe_trigger.py`** -- replaces `benchmark_warm_start.py` and
+  measures the mechanism that survived, on three axes separately because a trigger
+  needs all three:
+
+  | property | measured |
+  |---|---|
+  | cost: incremental correction vs full re-estimate | 3.3 ms vs 24.5 ms/frame = **7.54x** |
+  | discrimination: KL at cut vs mean within-shot | **33931x** |
+  | discrimination: KL at cut vs *worst* within-shot frame | **2591x** |
+  | false positives on a no-cut control | **0** in 23 frames |
+  | detection | fires exactly once, at the cut |
+  | ESS on the same sequence (the rejected trigger) | **0.871x** |
+
+  This 7.54x is what the efficiency claim now rests on, in place of 1.12x.
+
+* **`benchmark_stencil.py`** -- what upwinding buys and what it costs, in space. The
+  discrete operator is applied to a smooth analytic field and compared against the
+  exact continuous operator, which isolates truncation error without needing an exact
+  PDE solution. Boundary cells are excluded from every norm, since Neumann ghost-node
+  folding is first-order by construction and would otherwise report order 1 for both
+  stencils.
+
+  * **Observed spatial order: upwind 0.99, central 2.04.**
+  * **Artificial diffusion** fitted by projection onto the Laplacian matches the
+    `|v|h/2` prediction to 0.987-0.9998 across four grids. Reduced to config
+    quantities: `D_num / D = |s| h / 2`. **`g` cancels, so sigma is irrelevant** -- the
+    only levers are `diffusion.dh` and the score magnitude. At the shipped `dh = 1`
+    with `|s| ~ 1` the artificial diffusion is **~50% of the physical diffusion**.
+  * **Three distinct central-difference thresholds**, which are easy to conflate:
+    M-matrix (sign) condition at `|s|h <= 2`; diagonal dominance to `~2.53`; actual
+    divergence between 2.6 and 3.0. Upwind holds a margin of **exactly 1.0** at every
+    magnitude tested including `|s| = 25`.
+
+* **`fast_diffusion/model/evaluate_video.py`: FVD on canonical Kinetics-400 I3D** --
+  `load_i3d`, `i3d_features`, `DEFAULT_I3D_PATH`, `MIN_I3D_FRAMES`. 400-d pre-softmax
+  logits, the layer FVD is defined on, confirmed by assertion. Preprocessing is
+  delegated to the module's own `rescale`/`resize` flags rather than reimplemented,
+  because FVD is as sensitive to preprocessing as to weights.
+
+  Validated: ordering same-process 2.14 < shifted 89.78 < corrupted 947.0; identical
+  sets -7.6e-06. Guards verified to fire for sample count < 64, T < 9, and missing
+  weights.
+
+* **`data/VideoDataset.py`: `DavisVideoDataset`** -- DAVIS 2017 with real per-object
+  segmentation masks, wired in as `dataset: davis` with `davis_inpaint.yml`. 70 clips
+  of 16 frames load with 0 skipped; mask coverage ranges **0.3% to 54.6%** against a
+  synthetic box's fixed ~6%. Exposes `real_mask`, `sequence_name` and `mask_report`.
+
+  Masks are resized **nearest-neighbour, never bicubic**. Bicubic on a DAVIS
+  annotation was measured to produce fractional boundary values ranging to
+  `[-0.166, 1.173]` -- outside `[0, 1]` entirely -- which would put every masked
+  metric on the wrong support.
+
+* **`download_assets.py`** -- fetches and verifies the I3D weights (sha256
+  `bec6519f66ea534e...`, feature width asserted at 400) and DAVIS 2017 480p (sha256
+  `e3d0b5b77c3d031b...`, 90 sequences / 6208 frames, clearing `MIN_FVD_SAMPLES = 64`).
+  `assets/` added to `.gitignore`; without it 1.64 GB would have been committed.
+
+* **`run_video.py`: `build_mask` prefers a dataset-supplied real mask** over a
+  synthetic one and returns the source name, which is recorded on every results row.
+  Masked metrics are not comparable across mask families, so a table mixing a 6%
+  synthetic box with a 55% DAVIS object mask says nothing.
+
+### Changed -- scope
+
+* **Scope fixed to 2D dynamic video (`T x H x W`) throughout.** PLAN.md 7 moves from
+  "deferred" to decided-out-of-scope, and 1 gains an explicit scope paragraph.
+  README gains a video section stating it. `fp_video`, `fp_torch` and `network3d`
+  docstrings now say that "3D" means the number of axes in the linear system or the
+  use of `Conv3d`, never volumetric data -- the FP grid is (time, value, value), and
+  two of those axes are pixel-*value* axes rather than spatial ones.
+
+* **PLAN.md 1** no longer lists cross-frame warm starts as a core contribution, and
+  no longer describes the keyframe trigger as ESS-based. The risk table and milestone
+  table follow.
+
+* **`synth_contiguous.yml` and `SyntheticVideoDataset.contiguous`** retargeted from
+  the deleted warm start to the density estimator's incremental correction, which is
+  what `contiguous` actually affects now.
+
+### Corrections
+
+* **`scipy.linalg.sqrtm` no longer accepts `disp`**, so `_frechet_distance` raised
+  `TypeError` outright -- FVD and KID were both broken on any current SciPy. Now
+  handles either return convention, adds an ill-conditioning offset, and **refuses**
+  a large imaginary component rather than silently taking the real part.
+
+* **I3D `.view()` failure.** The module's resize path calls `.view()`, which fails on
+  the non-contiguous tensor a `permute` produces. Fixed with an explicit
+  `.contiguous()`; without it every I3D feature call raised.
+
+* **`benchmark_stencil` divergence test was too permissive.** `np.isfinite` reported a
+  solve returning **1.79e+143** as successful. Replaced with `mx < 10 * |rhs|.max()`,
+  which is justified because the FP step is a contraction on a non-negative rhs.
+
+* **`benchmark_stencil` column was mislabelled.** `predicted_central_ok` predicted the
+  M-matrix sign condition, not solvability -- central still solves at `|s| = 2.1` with
+  a positive margin. Renamed `m_matrix_predicted`, and all three thresholds are now
+  reported separately.
+
+* **A DAVIS check of my own was vacuous.** The `objects='all'` vs `'largest'`
+  comparison ran on `bear`, a single-object sequence, where the two are the same set
+  by definition and agreed trivially. Rerun on `bike-packing` (2 objects), where
+  `'largest'` correctly selects a strict subset: 0.1002 vs 0.1649 coverage.
 
 ---
 
@@ -37,7 +170,7 @@ regenerated: `benchmark_solver.py`, `benchmark_warm_start.py`, `benchmark_densit
   `SequentialDensityEstimator`, which propagates a running log-density grid across
   frames with an importance correction and triggers a full re-estimate (keyframe) on
   KL divergence. `effective_sample_size` is retained as a **diagnostic only**.
-* **`benchmark_warm_start.py`** — measures the cross-clip warm start against a
+* **`benchmark_warm_start.py`** *(since REMOVED — see the top entry)* — measured the cross-clip warm start against a
   cold-start control, on both contiguous and independent clips.
 
 ### Added -- inpainting (the target task)

@@ -1,0 +1,9 @@
+{
+  "D_physical": 0.5,
+  "drift": 8.0,
+  "observed_order_upwind": 0.9865148132890612,
+  "observed_order_central": 2.0415679327189147,
+  "relative_added_diffusion_formula": "|s| * h / 2",
+  "central_m_matrix_limit": "|s| * h <= 2",
+  "central_divergence_point": 2.6
+}

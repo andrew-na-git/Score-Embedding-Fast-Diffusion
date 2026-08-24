@@ -14,9 +14,13 @@ Distribution metrics
     `kid` : Kernel Inception Distance. Preferred over FID here because it is
     unbiased and usable at the sample counts this pipeline can realistically
     produce. Per-frame over a clip set.
-    `fvd` : Frechet Video Distance. Reported with its backbone named and its
-    sample count stated, because FVD is backbone-sensitive and comparisons across
-    papers using different feature extractors are not meaningful.
+    `fvd` : Frechet Video Distance on the canonical Kinetics-400 I3D features, so
+    values are comparable with published FVD. The weights are not redistributable
+    with the repo; fetch them with `python download_assets.py --only i3d`. If they
+    are absent, `fvd` raises rather than falling back to another backbone -- FVD is
+    a Frechet distance in one specific feature space, and computing it in a
+    different one produces a number on a different scale that looks equally
+    plausible. There is no substitute-backbone option at all, by design.
 
 Temporal metrics -- the ones this project's contribution is actually about
     `warping_error` : flow-warped L2 between consecutive frames. The direct
@@ -45,6 +49,8 @@ Sample-count guards
 number of samples rather than returning a misleading float. That guard is the
 whole point of this module; do not remove it to make a table look complete.
 """
+
+import os
 
 import numpy as np
 import torch
@@ -220,71 +226,174 @@ def kid(real_clips, fake_clips, subset_size=50, device=None):
     }
 
 
-def fvd(real_clips, fake_clips, device=None, backbone="r3d_18"):
-    """Frechet Video Distance over clip sets of shape (N, T, C, H, W).
+DEFAULT_I3D_PATH = os.path.join("assets", "i3d_torchscript.pt")
 
-    The canonical implementation uses an I3D network trained on Kinetics-400,
-    whose weights are not distributed with torchvision. This uses torchvision's
-    `r3d_18` (Kinetics-400) instead, which is a defensible substitute but *not*
-    numerically comparable to I3D-based FVD in other papers.
+# The I3D export refuses fewer than 9 frames: its temporal pooling stack reduces the
+# time axis below 1. A T=8 clip fails inside the TorchScript interpreter with an
+# unhelpful message, so it is checked up front.
+MIN_I3D_FRAMES = 9
 
-    Always report the backbone and the sample count next to the number. Do not
-    compare this value against published FVD figures computed with I3D.
+_I3D_CACHE = {}
+
+
+def load_i3d(weights=None, device=None):
+    """Load the Kinetics-400 I3D TorchScript module used to define FVD.
+
+    Refuses to proceed if the weights are absent rather than substituting another
+    network. FVD is a Frechet distance in a *specific* feature space; computing it
+    with a different extractor yields a number that is not on the same scale as any
+    published FVD, and silently doing so is how incomparable figures end up in
+    tables.
+
+    Fetch the weights with `python download_assets.py --only i3d`.
     """
-    from torchvision.models.video import R3D_18_Weights, r3d_18
+    path = weights or DEFAULT_I3D_PATH
+    device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    key = (os.path.abspath(path), str(device))
 
+    if key in _I3D_CACHE:
+        return _I3D_CACHE[key]
+
+    if not os.path.isfile(path):
+        raise FileNotFoundError(
+            f"I3D weights not found at {path!r}. FVD is only comparable with "
+            "published values when computed with the Kinetics-400 I3D features, so "
+            "no substitute backbone is used automatically. Run\n"
+            "    python download_assets.py --only i3d\n"
+            "or pass weights=<path>. To compute a self-consistent, explicitly "
+            "non-comparable value instead, call fvd(..., backbone='r3d_18')."
+        )
+
+    model = torch.jit.load(path).eval().to(device)
+    _I3D_CACHE[key] = model
+    return model
+
+
+def i3d_features(clips, weights=None, device=None, batch_size=8):
+    """400-d Kinetics logits for clips of shape (N, T, C, H, W) in [0, 1].
+
+    The module's own `rescale` and `resize` flags are used rather than
+    reimplementing its preprocessing: `rescale=True` expects [0, 255] and applies
+    `x/255*2-1`, and `resize=True` bilinearly resizes to 224x224. Matching the
+    reference implementation's preprocessing exactly matters as much as matching the
+    weights, since FVD is sensitive to both.
+
+    Features are taken pre-softmax (`return_features=True`), which is the layer FVD
+    is defined on.
+    """
+    device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    model = load_i3d(weights, device)
+
+    x = torch.as_tensor(np.asarray(clips), dtype=torch.float32)
+    if x.dim() != 5:
+        raise ValueError(f"expected (N, T, C, H, W), got shape {tuple(x.shape)}")
+    if x.shape[1] < MIN_I3D_FRAMES:
+        raise ValueError(
+            f"I3D needs at least {MIN_I3D_FRAMES} frames per clip; got {x.shape[1]}. "
+            "Its temporal pooling stack collapses below that and the TorchScript "
+            "module raises an opaque error."
+        )
+
+    # (N, T, C, H, W) -> (N, C, T, H, W), and [0, 1] -> [0, 255] for rescale=True.
+    # `.contiguous()` is required, not defensive: the module's resize path calls
+    # `.view()` on the permuted tensor, which fails outright on a non-contiguous
+    # input with a message about spanning two contiguous subspaces.
+    x = (x.permute(0, 2, 1, 3, 4) * 255.0).contiguous()
+
+    out = []
+    with torch.no_grad():
+        for i in range(0, x.shape[0], batch_size):
+            feats = model(x[i:i + batch_size].to(device), rescale=True, resize=True,
+                          return_features=True)
+            out.append(feats.cpu())
+    return torch.cat(out).numpy().astype(np.float64)
+
+
+def fvd(real_clips, fake_clips, device=None, weights=None):
+    """Frechet Video Distance over clip sets of shape (N, T, C, H, W) in [0, 1].
+
+    Computed on the canonical Kinetics-400 I3D features, so values are comparable
+    with published FVD. There is deliberately no alternative backbone: FVD is a
+    Frechet distance in one specific feature space, and the same clips scored through
+    a different extractor give a number on a different scale that looks just as
+    plausible. An earlier revision offered torchvision's `r3d_18` as a substitute;
+    it was removed, because a non-comparable FVD is not a weaker result but a
+    different quantity wearing the same name.
+
+    If the weights are missing this raises. Fetch them with
+    `python download_assets.py --only i3d`.
+
+    Returns a dict, not a float: the backbone, feature dimension and sample count
+    have to travel with the value or it cannot be interpreted.
+    """
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     real = torch.as_tensor(np.asarray(real_clips), dtype=torch.float32)
     fake = torch.as_tensor(np.asarray(fake_clips), dtype=torch.float32)
 
     check_sample_count(min(len(real), len(fake)), MIN_FVD_SAMPLES, "FVD")
 
-    if backbone != "r3d_18":
-        raise NotImplementedError(
-            f"backbone {backbone!r} not wired up; only 'r3d_18' is available "
-            "without external I3D weights"
-        )
+    fr = i3d_features(real, weights, device)
+    ff = i3d_features(fake, weights, device)
 
-    weights = R3D_18_Weights.DEFAULT
-    net = r3d_18(weights=weights).to(device).eval()
-    net.fc = torch.nn.Identity()
-
-    mean = torch.tensor(weights.transforms.keywords["mean"]).view(1, 3, 1, 1, 1)
-    std = torch.tensor(weights.transforms.keywords["std"]).view(1, 3, 1, 1, 1)
-
-    def features(clips):
-        # (N, T, C, H, W) -> (N, C, T, H, W), normalised.
-        x = clips.permute(0, 2, 1, 3, 4)
-        x = (x - mean) / std
-        out = []
-        with torch.no_grad():
-            for i in range(0, x.shape[0], 8):
-                out.append(net(x[i:i + 8].to(device)).cpu())
-        return torch.cat(out).numpy().astype(np.float64)
-
-    fr, ff = features(real), features(fake)
     return {
         "fvd": _frechet_distance(fr, ff),
-        "backbone": backbone,
+        "backbone": "i3d",
+        "feature_dim": int(fr.shape[1]),
+        "comparable_with_published": True,
         "n_real": len(real),
         "n_fake": len(fake),
+        "frames_per_clip": int(real.shape[1]),
     }
 
 
-def _frechet_distance(x, y):
-    """Frechet distance between two Gaussian fits."""
+def _frechet_distance(x, y, eps=1e-6):
+    """Frechet distance between two Gaussian fits.
+
+    Two numerical details matter and are handled explicitly rather than hoped away:
+
+    * `linalg.sqrtm` dropped its `disp` keyword in recent SciPy, so it is called
+      positionally-compatibly and the result unpacked defensively.
+    * The product of two sample covariances is frequently near-singular at these
+      sample counts, and `sqrtm` then returns a matrix with a small imaginary part or
+      fails outright. A conditioning offset is applied to the diagonals before
+      retrying, which is what the reference FID implementations do; discarding a
+      large imaginary component silently would corrupt the value instead.
+    """
     from scipy import linalg
 
+    x = np.atleast_2d(x)
+    y = np.atleast_2d(y)
     mu_x, mu_y = x.mean(axis=0), y.mean(axis=0)
     sigma_x = np.cov(x, rowvar=False)
     sigma_y = np.cov(y, rowvar=False)
 
-    covmean, _ = linalg.sqrtm(sigma_x @ sigma_y, disp=False)
+    def _sqrtm(a):
+        out = linalg.sqrtm(a)
+        # Older SciPy returned (sqrt, errest) when disp=False; newer returns the
+        # array. Accept either shape of return value.
+        return out[0] if isinstance(out, tuple) else out
+
+    covmean = _sqrtm(sigma_x @ sigma_y)
+
+    if not np.isfinite(covmean).all():
+        offset = np.eye(sigma_x.shape[0]) * eps
+        covmean = _sqrtm((sigma_x + offset) @ (sigma_y + offset))
+
     if np.iscomplexobj(covmean):
+        imag_scale = np.abs(covmean.imag).max()
+        real_scale = max(np.abs(covmean.real).max(), 1e-30)
+        if imag_scale / real_scale > 1e-3:
+            raise RuntimeError(
+                f"matrix square root has a large imaginary component "
+                f"({imag_scale:.3e} vs real {real_scale:.3e}); the covariance "
+                "estimate is too ill-conditioned for a trustworthy Frechet distance. "
+                "Increase the sample count."
+            )
         covmean = covmean.real
 
     diff = mu_x - mu_y
-    return float(diff @ diff + np.trace(sigma_x) + np.trace(sigma_y) - 2 * np.trace(covmean))
+    return float(diff @ diff + np.trace(sigma_x) + np.trace(sigma_y)
+                 - 2 * np.trace(covmean))
 
 
 # --------------------------------------------------------------------------
