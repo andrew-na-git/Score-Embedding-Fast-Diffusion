@@ -33,13 +33,40 @@ We use data from CIFAR, CelebA, and ImageNet datasets. For CelebA and ImageNet d
 
 The pipeline has three stages:
 
-1. **KDE initialisation** (`fast_diffusion/model/kfp.py` — `score_samples`)  
-   Per image and channel, pixel-value pairs are assembled into a `(2, N)` array and an initial log-density is estimated. We use a **2D histogram + FFT Gaussian smoothing** estimator (`_kde_log_density`):
-   - Bin N pixel-value pairs into a 256×256 grid — O(N)
-   - Apply `scipy.ndimage.gaussian_filter` with Scott's-rule bandwidth — O(M log M), M = 256²
-   - Bilinear interpolation back to sample coordinates — O(N)
+1. **Density initialisation** (`fast_diffusion/model/density.py` -- `score_samples`)
+   Per image and channel, pixel-value pairs are assembled into a `(2, N)` array and
+   an initial log-density is estimated. Three estimators are selectable through the
+   `diffusion.kde_method` config key:
 
-   This replaces the original `scipy.stats.gaussian_kde` (O(N²)) and is **~250× faster** for 64×64 images with negligible accuracy loss — the FP fixed-point iteration corrects small initialisation errors within 1–2 steps.
+   - `histogram` (default): bin into a 256x256 grid, smooth with
+     `scipy.ndimage.gaussian_filter` (FFT internally), then interpolate back to the
+     sample coordinates. O(N) binning plus O(M log M) convolution, M = 256^2.
+   - `scipy`: exact `scipy.stats.gaussian_kde`, O(N^2). Accuracy reference.
+   - `sklearn`: tree-accelerated `KernelDensity`.
+
+   Because the histogram estimator's cost is dominated by its **fixed** 256^2 grid,
+   it is roughly *constant in image resolution*, while exact KDE is O(N^2) in the
+   pixel count. Measured (`python benchmark_density.py`, median of 3, warmed up):
+
+   | resolution | N | histogram | scipy exact | speedup |
+   |---|---|---|---|---|
+   | 8x8 | 64 | 43.6 ms | 0.5 ms | 0.01x |
+   | 16x16 | 256 | 35.1 ms | 1.1 ms | 0.03x |
+   | 24x24 | 576 | 30.7 ms | 3.6 ms | 0.12x |
+   | 32x32 | 1,024 | 27.6 ms | 10.1 ms | 0.37x |
+   | 48x48 | 2,304 | 23.7 ms | 44.8 ms | **1.89x** |
+   | 64x64 | 4,096 | 23.0 ms | 142.9 ms | **6.20x** |
+   | 128x128 | 16,384 | 19.7 ms | intractable | -- |
+   | 256x256 | 65,536 | 23.3 ms | intractable | -- |
+
+   So the histogram estimator is **slower below about 48x48**, the crossover is at
+   48x48, and its advantage then grows quadratically with the pixel count.
+
+   > Correction: an earlier version of this README, and the docstring it came from,
+   > claimed "~250x faster for 64x64 images". That figure was never measured. The
+   > previously committed benchmark timed exact KDE only up to 32x32 and left the
+   > 64x64 column empty. The measured 64x64 speedup is 6.2x. Quote
+   > `benchmark_density.py` output, not the 250x figure.
 
 2. **Fokker-Planck solve** (`fast_diffusion/model/kfp.py` — `compute_scores`)  
    For each image and diffusion timestep, the log-density Fokker-Planck (FP) equation is discretised using a finite-difference stencil assembled as a sparse CSR matrix (`construct_A`). The system is solved with `scipy.sparse.linalg.spsolve`. A fixed-point iteration runs until the relative residual norm falls below `solve_tolerance` (default 2×10⁻⁸). Convergence typically takes 7–11 iterations. The score (log-density gradient) is extracted by centred finite differences.

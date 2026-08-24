@@ -1,0 +1,10 @@
+{
+  "device": "cuda",
+  "device_name": "NVIDIA RTX 2000 Ada Generation Laptop GPU",
+  "repeats": 3,
+  "sigma": 5.0,
+  "num_timesteps": 20,
+  "inner_tolerance": 1e-06,
+  "channels": 3,
+  "torch": "2.11.0+cu128"
+}

@@ -5,3 +5,9 @@
 cifar-10-batches-py
 *.gz
 saves/
+
+# Downloaded evaluation assets: the Kinetics-400 I3D weights and the DAVIS 2017
+# archive, ~1.6 GB. Fetch them with `python download_assets.py`, which verifies
+# sizes and records SHA-256 digests in assets/MANIFEST.json so a later run can
+# confirm it is using identical bytes -- FVD values depend on the exact weights.
+assets/

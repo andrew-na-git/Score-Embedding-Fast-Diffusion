@@ -13,7 +13,7 @@ from data.metrics import mse_metric, ssim_metric, fid_metric
 from .kfp import compute_scores
 from network.network import Net
 from .sample import unconditional_sample, conditional_sample
-from .loss import slice_wasserstein_loss
+from .loss import denoising_score_matching_loss
 from .dataloader import create_batch
 import shutil
 
@@ -51,7 +51,7 @@ def diffuse_train(model, dataset, scores, config, save_folder, profile=False):
   for e in tqdm(range(epochs)):
     for i, data in enumerate(dataset):
       batch, t, diff_std2, std, z, img_idx = create_batch(init_x[i], scores_label, config, i)
-      loss = slice_wasserstein_loss(model_score, batch.to(device), t.to(device), diff_std2.to(device), std.to(device), z.to(device), img_idx=img_idx.to(device))
+      loss = denoising_score_matching_loss(model_score, batch.to(device), t.to(device), diff_std2.to(device), std.to(device), z.to(device), img_idx=img_idx.to(device))
       optimizer.zero_grad()
       loss.backward()
 

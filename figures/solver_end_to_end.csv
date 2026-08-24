@@ -1,0 +1,4 @@
+shape,gpu_s,cpu_s,speedup,gpu_iters,cpu_iters,converged,gpu_vs_cpu_rel_err
+8x32x32,12.7,4.6,0.36,4,4,True,8.183476438716752e-07
+16x64x64,31.1,42.2,1.36,4,4,True,6.025333050274639e-07
+16x128x128,55.7,298.5,5.36,4,4,True,5.167534595784673e-07

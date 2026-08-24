@@ -10,6 +10,11 @@ Usage:
     python reproduce_all.py --ablations-only # Only ablation configs
     python reproduce_all.py --seeds 9 42 123 # Custom seed list
     python reproduce_all.py --profile        # Enable MSE/SSIM profiling over time
+    python reproduce_all.py --force         # Re-run completed configs so they are timed
+
+Exits nonzero if any run failed. The summary CSV records a three-valued `status`
+(ok / skipped / failed) rather than a boolean success, so a skipped run is never
+presented as a completed one.
 """
 
 import subprocess
@@ -18,6 +23,7 @@ import os
 import csv
 import argparse
 import time
+from collections import Counter
 from pathlib import Path
 
 FAST_DIFFUSION_DIR = os.path.join(os.path.dirname(__file__), "fast_diffusion")
@@ -64,8 +70,22 @@ COMPARISON_CONFIGS = [
 DEFAULT_SEEDS = [9, 42, 123]
 
 
-def run_experiment(working_dir, config, seed=None, profile=False):
-    """Run a single experiment. Returns (success, wall_time, save_folder)."""
+def run_experiment(working_dir, config, seed=None, profile=False, force=False):
+    """Run a single experiment.
+
+    Returns
+    -------
+    status : 'ok', 'skipped' or 'failed'.
+    wall_time : measured seconds, or None when nothing was run.
+    save_folder : where the run's outputs live.
+
+    `status` is deliberately a string rather than a bool. Returning True for a
+    skipped run made completed and skipped runs indistinguishable in the summary
+    CSV, and pairing it with a wall time of 0.00 -- from `timing.get("total", 0)` on
+    runs that never wrote a `total` row -- produced a table that read as "all
+    experiments succeeded, several of them instantly". Callers must record `status`
+    verbatim and must not coerce it to a boolean.
+    """
     cmd = [sys.executable, "run.py", "--config", config]
     if seed is not None:
         cmd += ["--seed", str(seed)]
@@ -78,14 +98,13 @@ def run_experiment(working_dir, config, seed=None, profile=False):
         folder_name += f"_seed{seed}"
     save_folder = os.path.join(working_dir, "saves", folder_name)
 
-    # Skip if already completed
-    if os.path.exists(os.path.join(save_folder, "model.pth")):
+    if os.path.exists(os.path.join(save_folder, "model.pth")) and not force:
         print(f"\n{'='*60}")
         print(f"SKIPPING (already complete): {folder_name}")
+        print("  Its wall time was not measured in this invocation and is reported")
+        print("  as empty, not zero. Use --force to re-run and time it.")
         print(f"{'='*60}")
-        timing = collect_timing(save_folder)
-        wall = float(timing.get("total", 0))
-        return True, wall, save_folder
+        return "skipped", None, save_folder
 
     print(f"\n{'='*60}")
     print(f"Running: {' '.join(cmd)}")
@@ -97,13 +116,13 @@ def run_experiment(working_dir, config, seed=None, profile=False):
     try:
         result = subprocess.run(cmd, cwd=working_dir, capture_output=False, text=True)
         wall = time.time() - t0
-        success = result.returncode == 0
+        status = "ok" if result.returncode == 0 else "failed"
     except Exception as e:
         print(f"ERROR: {e}")
         wall = time.time() - t0
-        success = False
+        status = "failed"
 
-    return success, wall, save_folder
+    return status, wall, save_folder
 
 
 def collect_timing(save_folder):
@@ -129,6 +148,9 @@ def main():
                         help=f"Seeds to use (default: {DEFAULT_SEEDS})")
     parser.add_argument("--profile", action="store_true", help="Enable MSE/SSIM profiling")
     parser.add_argument("--dry-run", action="store_true", help="Print commands without running")
+    parser.add_argument("--force", action="store_true",
+                        help="Re-run configs that already have a model.pth, so their "
+                             "wall time is actually measured instead of reported empty")
     args = parser.parse_args()
 
     # Determine which configs to run
@@ -152,16 +174,17 @@ def main():
             if args.dry_run:
                 print(f"[DRY RUN] cd {FAST_DIFFUSION_DIR} && python run.py --config {config} --seed {seed}")
                 continue
-            success, wall, save_folder = run_experiment(
-                FAST_DIFFUSION_DIR, config, seed=seed, profile=args.profile
+            status, wall, save_folder = run_experiment(
+                FAST_DIFFUSION_DIR, config, seed=seed, profile=args.profile,
+                force=args.force,
             )
-            timing = collect_timing(save_folder) if success else {}
+            timing = collect_timing(save_folder) if status != "failed" else {}
             results.append({
                 "type": "fast_diffusion",
                 "config": config,
                 "seed": seed,
-                "success": success,
-                "wall_time": f"{wall:.2f}",
+                "status": status,
+                "wall_time": "" if wall is None else f"{wall:.2f}",
                 "kde_time": timing.get("kde_init", ""),
                 "fp_time": timing.get("fp_solve", ""),
                 "fp_iters": timing.get("fp_iterations", ""),
@@ -173,15 +196,15 @@ def main():
         if args.dry_run:
             print(f"[DRY RUN] cd {COMPARISONS_DIR} && python run.py --config {config}")
             continue
-        success, wall, save_folder = run_experiment(
-            COMPARISONS_DIR, config, profile=args.profile
+        status, wall, save_folder = run_experiment(
+            COMPARISONS_DIR, config, profile=args.profile, force=args.force
         )
         results.append({
             "type": "comparison",
             "config": config,
             "seed": "",
-            "success": success,
-            "wall_time": f"{wall:.2f}",
+            "status": status,
+            "wall_time": "" if wall is None else f"{wall:.2f}",
             "kde_time": "",
             "fp_time": "",
             "fp_iters": "",
@@ -195,19 +218,26 @@ def main():
     total_wall = time.time() - total_start
     summary_path = os.path.join(os.path.dirname(__file__), "reproduction_summary.csv")
     with open(summary_path, "w", newline="") as f:
-        fieldnames = ["type", "config", "seed", "success", "wall_time",
+        fieldnames = ["type", "config", "seed", "status", "wall_time",
                        "kde_time", "fp_time", "fp_iters", "train_time"]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(results)
 
+    counts = Counter(r["status"] for r in results)
     print(f"\n{'='*60}")
-    print(f"All experiments complete. Total wall time: {total_wall:.1f}s")
+    print(f"Total wall time this invocation: {total_wall:.1f}s")
     print(f"Summary written to: {summary_path}")
-    n_success = sum(1 for r in results if r["success"])
-    print(f"Results: {n_success}/{len(results)} succeeded")
+    print(f"  ran:     {counts['ok']}")
+    print(f"  skipped: {counts['skipped']}  (already complete; not timed here)")
+    print(f"  failed:  {counts['failed']}")
+    if counts["skipped"]:
+        print("Skipped runs carry an empty wall_time. Re-run with --force to time them.")
+    if counts["failed"]:
+        print("FAILURES PRESENT -- do not report these results as complete.")
     print(f"{'='*60}")
+    return 1 if counts["failed"] else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)

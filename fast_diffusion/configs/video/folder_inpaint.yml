@@ -1,0 +1,124 @@
+name: folder_inpaint
+
+# Real footage from a directory of frames. This is the headline configuration.
+#
+# Two things change relative to the synthetic config and both cost something:
+#  * `flow_method` can no longer be 'true'. Every flow-dependent metric now carries
+#    optical-flow error, so report the flow method used and do not compare numbers
+#    across different ones.
+#  * 128 px puts the solve firmly in the regime where the GPU backend pays off
+#    (measured 5.4x end-to-end at 16x128x128 vs 1.4x at 16x64x64).
+#
+# Set `data_loader.root` to a directory of numbered frame images before running.
+
+data_loader:
+  dataset: folder
+  root: PLEASE_SET_ME
+  num_clips: 2
+  clip_len: 16
+  image_size: 128
+  channels: 3
+  seed: 9
+  stride: 1
+  batch_size: 4
+
+diffusion:
+  sigma: 5
+  dh: 1
+  num_timesteps: 20
+  solve_tolerance: 1e-4
+
+  # Upwind differencing. Not a tuning knob: with 'central' the operator loses
+  # diagonal dominance once |s| grows and the iteration diverges outright (measured
+  # overflow at |s| ~ 5). Upwind is unconditionally stable here -- the stability
+  # margin is exactly 1.0 for every (sigma, N, |s|) tested -- at the cost of being
+  # first-order in space, which introduces numerical diffusion of order |v|h/2.
+  stencil: upwind
+  boundary: neumann
+
+  # 'auto' picks numpy below 96 px and the GPU backend at or above it, because the
+  # GPU solve is kernel-launch bound and is a net loss on small grids (0.36x at
+  # 8x32x32, 5.4x at 16x128x128). Force with 'numpy' or 'torch'.
+  backend: auto
+
+  inner_tolerance: 1e-6
+  max_inner_sweeps: 100
+  max_fp_iterations: 10
+
+  kde_method: histogram
+  estimator:
+    n_bins: 256
+    coarse_bins: 64
+    threshold_mode: adaptive
+    kl_factor: 4.0
+    # Floor is load-bearing. With a purely adaptive median threshold the baseline
+    # collapses to ~1e-6 inside a static shot and the trigger fires on noise; the
+    # floor removed three spurious keyframes on the no-cut control.
+    kl_floor: 1.0e-3
+    history_window: 8
+    warmup: 3
+
+training:
+  epochs: 200
+  lr: 8e-5
+  grad_clip: False
+  timestep_multiplier: 1
+
+model:
+  max_positions: 10000
+  in_channels: 3
+  out_channels: 3
+  ch: 64
+  ch_mult: [1, 2, 2]
+  num_res_blocks: 1
+  attention_resolutions: [16, ]
+  dropout: 0.1
+  resample_with_conv: True
+  embedding_method: linear
+
+  # Must be >= data_loader.num_clips; train_video checks and refuses otherwise.
+  num_clips: 2
+  max_frames: 512
+
+  # Temporal layers are zero-initialised, so at init the network is exactly its
+  # spatial counterpart (verified: max output difference 0.0e+00 with and without
+  # the temporal path). That makes 2D-pretrained inflation a valid starting point.
+  temporal_attention: True
+
+sample:
+  type: inpaint
+
+  # Fixed-step count for the masked probability-flow ODE. This doubles as the
+  # function-evaluation count, so it is the number to compare against the adaptive
+  # sampler's nfev when reporting cost.
+  n_steps: 200
+
+  # 'fixed' keeps the sampler a deterministic map given the seed; 'fresh' is the
+  # RePaint-style redraw. Ablate, do not assume.
+  known_noise: fixed
+
+  # Clamp the fill to the observed pixels' value range. Applied identically to the
+  # method and to every baseline, so it cannot decide a comparison.
+  clamp_output: True
+
+  window: 4
+  overlap: 1
+
+inpaint:
+  # moving_box is the case that requires temporal reasoning: 18.8% of pixels are
+  # unknown on some frames and known on others, so the correct fill exists elsewhere
+  # in the clip. static_box is the spatial-only control at matched coverage.
+  mask: moving_box
+  size: 0.25
+  dilate: 2
+
+evaluation:
+  # 'true' flow does not exist for real footage. 'raft' is more accurate than
+  # 'blockmatch' but is itself a learned model with its own failure modes; state
+  # which was used next to any warping-error figure.
+  flow_method: raft
+  with_lpips: True
+
+misc:
+  eps: 1e-3
+  profile_freq: 2

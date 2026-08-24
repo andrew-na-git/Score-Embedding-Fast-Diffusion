@@ -13,3 +13,11 @@ scikit-image>=0.21.0
 pytz>=2023.3
 scipy>=1.11.0
 numpy>=1.24.0
+
+# Video extension
+# lpips: flow-warped perceptual temporal metric (evaluate_video.warped_lpips)
+lpips>=0.1.4
+# Pillow: frame loading for data.VideoDataset.FolderVideoDataset
+Pillow>=10.0.0
+# av: video decoding backend for torchvision.io.read_video, used by FileVideoDataset
+av>=11.0.0
