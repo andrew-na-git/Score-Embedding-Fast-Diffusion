@@ -1,0 +1,590 @@
+% ===========================================================================
+%  EUROGRAPHICS 2027 -- full paper (proceedings in Computer Graphics Forum)
+%  Working title: Sequential Score Pre-computation for Video Diffusion
+%
+%  BUILD REQUIREMENTS
+%  ------------------
+%  This draft uses a GENERIC, stock class (article, two-column) so it compiles
+%  anywhere with no external kit:
+%
+%      pdflatex main ; bibtex main ; pdflatex main ; pdflatex main
+%
+%  TO SWAP IN THE EUROGRAPHICS/CGF KIT at submission time:
+%    1. Replace the \documentclass line below with   \documentclass{egpubDL}
+%    2. Replace the generic author block (\author{...}) with the EG block kept
+%       verbatim in the "EG AUTHOR BLOCK" comment beside it.
+%    3. Uncomment the \teaser{...} block and the \begin{classification} CCS block.
+%    4. Set \bibliographystyle{eg-alpha-doi} (see the bibliography line).
+%  egpubDL.cls and eg-alpha-doi.bst ship in the EG author kit and are NOT
+%  vendored here (not redistributable). Every EG-only construct is tagged
+%  "% EG-KIT:" so the swap is a grep.
+%
+%  STATUS LEGEND used throughout:
+%     [WRITTEN]  -- content backed by a measured result in this repo.
+%     TODO(...)  -- a placeholder that MUST be filled before submission.
+%
+%  CLAIM DISCIPLINE (do not relax): every speedup is FITTING/PRECOMPUTE
+%  wall-clock, never sampling; every quality comparison must be at matched
+%  wall-clock; nothing may imply volumetric/4D support -- the domain is
+%  2D dynamic video (T x H x W).
+% ===========================================================================
+
+\documentclass[10pt,twocolumn]{article}      % EG-KIT: replace with \documentclass{egpubDL}
+
+\usepackage[a4paper,margin=1.8cm]{geometry}  % EG-KIT: delete (class sets the layout)
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{subcaption}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{url}
+\usepackage{xcolor}
+\graphicspath{{./figures/}}
+
+% Lightweight editorial marker for the drafting phase. Delete before submission.
+\newcommand{\todo}[1]{{\color{red}\textbf{[TODO: #1]}}}
+\newcommand{\needsnum}[1]{{\color{red}\underline{#1}}} % a number awaiting a run
+
+\theoremstyle{plain}
+\newtheorem{proposition}{Proposition}
+\newtheorem{remark}{Remark}
+
+% ---------------------------------------------------------------------------
+\begin{document}
+
+% --- Generic title/author block (compiles under article). ---
+% EG-KIT: replace this whole block with the "EG AUTHOR BLOCK" below it.
+\title{Sequential Score Pre-computation for Video Diffusion via\\
+       Upwind Fokker--Planck Solves and KL-Triggered Keyframing}
+\author{%
+  A.\,S.~Na\thanks{Corresponding author: andrew.na@uwaterloo.ca} \and
+  W.~Gao \and M.~Briazkalo \and J.\,W.\,L.~Wan\\
+  \normalsize David R. Cheriton School of Computer Science,
+  University of Waterloo, Ontario, Canada}
+\date{}
+
+% EG AUTHOR BLOCK (kit convention: running-head list in [], full block in {}).
+% EG-KIT: uncomment the following and delete the generic block above.
+% \title[Sequential Score Pre-computation for Video Diffusion]%
+%       {Sequential Score Pre-computation for Video Diffusion via\\
+%        Upwind Fokker--Planck Solves and KL-Triggered Keyframing}
+% \author[A.\,S.~Na, W.~Gao, M.~Briazkalo \& J.\,W.\,L.~Wan]{%
+%   \parbox{\textwidth}{\centering
+%     A.\,S.~Na\textsuperscript{1}\thanks{Corresponding author: andrew.na@uwaterloo.ca}
+%     \quad W.~Gao\textsuperscript{1}
+%     \quad M.~Briazkalo\textsuperscript{1}
+%     \quad J.\,W.\,L.~Wan\textsuperscript{1}}
+%   \\
+%   {\parbox{\textwidth}{\centering
+%     \textsuperscript{1}David R. Cheriton School of Computer Science,
+%     University of Waterloo, Ontario, Canada}}
+% }
+
+% -- Teaser: object-removal before/after strip. Asset not yet rendered.
+% EG-KIT: \teaser is provided by egpubDL; uncomment at submission.
+% \teaser{
+%   \includegraphics[width=\linewidth]{teaser_object_removal}
+%   \centering
+%   \caption{TODO(teaser): input clip, mask, and our temporally-coherent fill,
+%            side by side across frames. Render from run_video.py on a DAVIS clip.}
+%   \label{fig:teaser}
+% }
+
+\maketitle
+
+% ===========================================================================
+\begin{abstract}
+Training-free, per-instance diffusion priors are attractive for video editing
+because they require no external training corpus, but fitting them is dominated
+by the cost of estimating the score field. We extend a per-instance score
+\emph{pre-computation} scheme -- in which the log-density Fokker--Planck (FP)
+equation is solved numerically \emph{before} network fitting rather than being
+learned -- from single images to \textbf{2D dynamic video} ($T\times H\times W$:
+two spatial dimensions plus time). Our contributions are numerical and
+systems-level. First, we discretise the video FP operator with an
+\emph{upwind} stencil and solve it by line Gauss--Seidel relaxation; the
+resulting operator is an M-matrix with a row-dominance margin of exactly one for
+every configuration we tested, which removes the $\sigma^2\Delta t\le\tfrac12$
+stability restriction of the central-difference scheme entirely. We report the
+cost of that guarantee honestly: the scheme is first-order and injects
+artificial diffusion of $|s|h/2$. Second, exploiting the near-identity of the FP
+operator between consecutive frames, we perform \emph{sequential importance
+sampling} on the low-dimensional density-estimation coordinates and trigger a
+full re-estimate only when a Kullback--Leibler statistic on the importance
+weights indicates the warped proposal has failed; this incremental correction is
+$7.5\times$ cheaper per frame than re-estimation while detecting scene cuts with
+zero false positives on our control sequence. We instantiate the pipeline for
+per-instance video inpainting / object removal, where fitting to a single clip
+is the accepted methodology and temporal incoherence is the metric of interest.
+\emph{All speedups are fitting/pre-compute wall-clock, not sampling.}
+\end{abstract}
+
+% EG-KIT: the ACM CCS classification block below is rendered by egpubDL inside
+% the abstract. Uncomment it there and delete this \keywords line at submission.
+\medskip\noindent\textbf{CCS Concepts / Keywords:}
+video diffusion; per-instance fitting; Fokker--Planck; upwind finite differences;
+M-matrix stability; sequential importance sampling; video inpainting.
+% \begin{classification} % https://www.acm.org/publications/class-2012
+% \CCScat{Computing methodologies}{Computer graphics}{Image manipulation}{Computational photography}
+% \CCScat{Mathematics of computing}{Numerical analysis}{Partial differential equations}{}
+% \end{classification}
+
+% ===========================================================================
+\section{Introduction}
+% [WRITTEN -- framing is fixed and defensible]
+
+Diffusion models are now the dominant tool for image and video synthesis, but a
+diffusion \emph{prior} is expensive to obtain: it is normally amortised by
+training a network on a large corpus. A complementary line of work fits a prior
+to a \emph{single} instance -- one image, or here one clip -- with no external
+training data. This per-instance regime, in the lineage of the Deep Image
+Prior~\cite{ulyanov-2018-dip}, is exactly the setting where video editing tasks
+such as inpainting and object removal are most naturally posed: the content to
+be respected is the clip in front of you, not a dataset.
+
+This paper builds on a per-instance \emph{score pre-computation} scheme for
+score-based diffusion~\cite{ysong-2020}. Rather than learning the score
+$\nabla_x\log p$ with a network, the log-density FP equation is solved
+numerically before fitting, and the pre-computed score is embedded into the
+training signal. On single images this reduces fitting wall-clock
+substantially. We extend it to video and confront the two problems that
+appear the moment a temporal axis is added: (i) the numerical stability of the
+FP solve on a three-axis grid, and (ii) the cost of re-estimating the density
+for every frame when consecutive frames are nearly identical.
+
+\medskip\noindent\textbf{Scope: 2D dynamic video.} The domain is
+$T\times H\times W$ throughout. The FP solve runs on a three-axis grid, but two
+of those axes are pixel-\emph{value} axes and the third is time; this is 2D
+imagery in motion, not volumetric or 4D data. Dynamic 3D/4D representations
+(deformable Gaussians, dynamic NeRF) are out of scope. Where the implementation
+says ``3D operator'' it refers to the three axes of the linear system.
+
+\medskip\noindent\textbf{Regime and claim discipline.} This is a per-instance
+pre-computation and fitting accelerator, \emph{not} a generative model of a data
+distribution. Reported quality is measured against the fitted clip, and every
+speedup is \emph{fitting/pre-compute} wall-clock, never sampling. We state this
+in the abstract, here, and in every table caption, because the distinction is
+easy to lose.
+
+\medskip\noindent\textbf{Contributions.}
+\begin{enumerate}
+  \item An \textbf{unconditionally stable} video FP solver: an upwind
+        discretisation solved by full-diagonal line Gauss--Seidel, proven an
+        M-matrix in practice (dominance margin exactly $1.0$ across all tested
+        $\sigma$, $N$, $|s|$), matching the unsplit solve to $4.6\times10^{-9}$.
+        We quantify its first-order accuracy cost exactly (Sec.~\ref{sec:stab}).
+  \item A \textbf{KL-triggered sequential importance sampler} that reuses the
+        previous frame's converged density as a motion-warped proposal and
+        re-estimates only on demand, $7.5\times$ cheaper per frame than
+        per-frame re-estimation, with a keyframe rule that is interpretable as a
+        scene-cut / disocclusion detector (Sec.~\ref{sec:keyframe}).
+  \item A per-instance \textbf{video inpainting} instantiation with masked,
+        motion-compensated evaluation, and an honest account of where the
+        temporal path does and does not yet help (Sec.~\ref{sec:exp}).
+\end{enumerate}
+
+% ===========================================================================
+\section{Related Work}
+% [WRITTEN -- structure fixed; expand prose and complete citations]
+
+\noindent\textbf{Score-based and denoising diffusion.} SMLD~\cite{ysong-2019},
+DDPM~\cite{ho-2020} and the unifying SDE
+framework~\cite{ysong-2020,sohl-dickstein-2015} parameterise data corruption as
+a stochastic process and learn the score by denoising score
+matching~\cite{hyvarinen-2005,vincent-2011}.
+
+\noindent\textbf{Fast sampling.} DDIM~\cite{jsong-2020} and dedicated ODE
+solvers, DPM-Solver / DPM-Solver++~\cite{lu-2022,lu-2022-dpmpp}, and distilled
+or few-step models -- consistency models~\cite{song-2023-consistency}, rectified
+flow~\cite{liu-2023-rectified} -- attack \emph{sampling} cost. Our contribution
+is orthogonal: it reduces \emph{fitting} cost. \todo{make the orthogonality
+explicit and cite the one-sentence distinction reviewers will look for.}
+
+\noindent\textbf{FP equation and diffusion.} The connection between the forward
+SDE, reverse SDE and FP equation is classical~\cite{anderson-1982,oksendal-1987}.
+FP-Diffusion~\cite{lai-2022} adds a score-FP regulariser under regularity
+conditions; Boffi and Vanden-Eijnden~\cite{boffi-2022} solve the probability-flow
+equation with networks. We instead solve the log-density FP equation directly by
+finite differences, avoiding both the network-per-timestep cost and the
+regularity assumptions.
+
+\noindent\textbf{Video diffusion.} Trained video diffusion
+models~\cite{ho-2022-video,blattmann-2023-svd} are a different setting (large
+corpora, sampling-time cost) and are reported as clearly-labelled context, not as
+matched baselines. \todo{add 1--2 recent (2024--2026) video inpainting / object
+removal methods; identify at least one zero-shot / internal-learning method as a
+same-category comparison~\cite{ouyang-2021-internal}.}
+
+\noindent\textbf{Numerics.} Upwinding, M-matrices and the discrete maximum
+principle are standard~\cite{leveque-2007,morton-mayers-2005,varga-2000}; line
+relaxation and ADI descend from~\cite{peaceman-rachford-1955}. Sequential
+importance sampling and effective sample size come from the SMC
+literature~\cite{doucet-2001-smc,kong-1994-ess}. Motion fields use
+RAFT~\cite{teed-2020-raft}.
+
+% ===========================================================================
+\section{Background: score pre-computation}
+% [WRITTEN -- carried and condensed from the image paper]
+
+For $t\in[0,T]$ a clip frame $x(t)\in\mathbb{R}^{H\times W}$ evolves under a
+forward SDE
+\begin{equation}
+  dx(t) = f(x(t),t)\,dt + g(t)\,dW,
+  \label{eq:forward_sde}
+\end{equation}
+with reverse-time SDE~\cite{anderson-1982}
+$dx = [f - g^2\nabla_x\log p]\,dt + g\,d\tilde W$ and marginal density $p(x,t)$
+governed by the Fokker--Planck equation
+$p_t = -\nabla_x\!\cdot(F p)$, $F = f - \tfrac12 g^2\nabla_x\log p$. The only
+unknown in the coupled system is the score $\nabla_x\log p$. Writing
+$m\equiv\log p$ and using $\partial_t\log p = p_t/p$ and
+$\nabla_x\log p = \nabla_x p / p$ gives the log-density FP equation
+\begin{equation}
+  m_t = -\nabla_x\!\cdot f + \tfrac12 g^2\nabla_x^2 m
+        - f\!\cdot\!\nabla_x m + \tfrac12 g^2 (\nabla_x m)^2,
+  \label{eq:log-FP}
+\end{equation}
+solved directly (no regularity assumptions), with the nonlinear $(\nabla_x m)^2$
+term linearised by fixed-point iteration. The converged $\nabla_x m$ is embedded
+into perturbed training inputs; the network is fitted under weighted denoising
+score matching
+$\mathcal{L}=\mathbb{E}_t\big[\tfrac{1}{2g^2}\!\int_\Omega \|s_\theta(x{+}\lambda z,t)\lambda + z\|_2^2\,p\,dx\big]$.
+\todo{condense the image-paper derivation to $\le$1 column; the audience here is
+graphics, not the PDE details -- keep \eqref{eq:log-FP}, drop the block-matrix
+assembly to supplemental.}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{pipeline_diffusion_cropped.png}
+  \caption{Score-embedding pipeline (image path). The FP score is solved
+  numerically \emph{before} fitting and embedded into the training signal.
+  \todo{redraw for the video path: add the frame axis, the warped-proposal reuse
+  arrow, and the KL keyframe gate.}}
+  \label{fig:pipeline}
+\end{figure}
+
+% ===========================================================================
+\section{Method}
+\label{sec:method}
+
+\subsection{Video FP operator on $T\times H\times W$}
+% [WRITTEN -- solver design fixed and validated]
+The density-estimation coordinates are pixel-value pairs; the FP grid has three
+axes (two value axes, one time axis). We assemble the operator with proper
+Neumann conditions on the true grid -- a prerequisite, since flattened-grid
+assembly couples the end of each row to the start of the next and, with a
+temporal axis, leaks density \emph{across frame boundaries}, producing exactly
+the flicker a graphics reviewer looks for. A direct sparse solve
+(\texttt{spsolve}) on $T\cdot H\cdot W$ unknowns is intractable at useful
+resolutions, so we solve by line relaxation.
+
+\subsection{Upwind stencil and line Gauss--Seidel}
+% [WRITTEN]
+We discretise the drift term by \emph{upwinding} and solve by line
+Gauss--Seidel over directions, retaining the \emph{full} operator diagonal in
+every tridiagonal factor. Reaching a correct scheme required three corrections,
+each caught by measurement and recorded in Sec.~\ref{sec:stab}: a removed Strang
+half-solve variant, node-indexed vs.\ neighbour-indexed assembly (which flips a
+dominance margin from $-89.3$ to exactly $1.0$), and diagonal ownership (a factor
+carrying only part of the diagonal drove the iteration-matrix norm to $2$ and
+diverged). Line relaxation converges to the exact unsplit solution
+(splitting error $4.6\times10^{-9}$ at inner tolerance $10^{-8}$), so there is no
+splitting error to defend.
+
+\begin{algorithm}[t]
+\caption{Per-frame FP solve (fixed-point over the linearised operator).}
+\label{alg:solve}
+\begin{algorithmic}
+\Require initial $m^{0}$, drift $f$, $g$, inner tol.\ $\tau$, outer tol.
+\While{outer residual $>$ tol}
+  \State assemble upwind operator $A$ from node-local coefficients
+  \State solve $A m = b$ by full-diagonal line Gauss--Seidel to $\tau$
+  \State update $\nabla_x m$ by centred differences; update residual
+\EndWhile
+\State \Return $\nabla_x m$
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Sequential importance sampling with a KL keyframe trigger}
+\label{sec:keyframe}
+% [WRITTEN -- this is the surviving efficiency mechanism]
+Consecutive frames have nearly identical FP operators. Frame $k{-}1$'s converged
+density is used as a proposal; density-estimation particles are advected by the
+estimated motion field~\cite{teed-2020-raft} and reweighted, so only the
+residual content the warped predecessor cannot explain needs fresh estimation.
+Temporal coherence then holds \emph{by construction}, not via a consistency
+penalty.
+
+\begin{remark}[Dimensionality]
+Importance sampling degenerates in high dimensions. We do \textbf{not} perform IS
+in the $H\!\cdot\!W$-dimensional pixel space -- only on the low-dimensional
+density-estimation coordinates. This is stated explicitly to pre-empt the
+curse-of-dimensionality objection, which would otherwise be correct.
+\end{remark}
+
+A full re-estimate is triggered only when the proposal has stopped being usable.
+We use $\mathrm{KL}(\text{target}\,\|\,\text{proposal})$ with an adaptive
+threshold $\max(\texttt{kl\_factor}\cdot\text{running median},\ \texttt{kl\_floor})$;
+the floor is necessary because on smooth motion the running median falls to
+$\sim\!10^{-6}$ and a purely relative rule fires spuriously. Effective sample
+size (ESS), the originally proposed trigger, was implemented and found
+\emph{blind} (Sec.~\ref{sec:kf-results}); it is retained only as a reported
+diagnostic.
+
+\begin{remark}[Known limitation]
+Pixel-value pairs are a \emph{global} statistic, insensitive to purely spatial
+rearrangement: a cut that changes layout while preserving the value distribution
+is hard to detect. Building the density on temporal pairs
+$(I_k(p), I_{k-1}(\mathrm{warp}(p)))$ puts motion compensation into the
+coordinate system; this is an ablation axis (Sec.~\ref{sec:ablations}), not a
+footnote.
+\end{remark}
+
+\subsection{Spatio-temporal backbone and sampler}
+% [WRITTEN -- implemented; results pending]
+The network is a factorised (2+1)D convolutional U-Net with temporal
+attention~\cite{tran-2018-r2plus1d,ronneberger-2015,vaswani-2017}, indexed by a
+clip-identity embedding. Temporal layers are zero-initialised, so at
+initialisation the model reproduces the 2D model exactly (max difference
+$0.0$) -- ``no temporal layers'' is therefore a genuine ablation baseline.
+Sampling for inpainting uses a fixed-step probability-flow integrator that
+projects the known region back \emph{between} steps (a black-box \texttt{solve\_ivp}
+exposes no hook for this and lets the known region drift).
+
+% ===========================================================================
+\section{Implementation}
+% [WRITTEN]
+The FP solve has a NumPy reference and a Torch GPU port that reproduces it
+bit-for-bit (relative difference $0.0$ on coefficients, diagonal, operator
+application, both stencils' solves, and the gradient). Channel batching gives
+$2.1$--$3.3\times$ at zero numerical cost. FVD uses the canonical Kinetics-400
+I3D features~\cite{carreira-2017-i3d,unterthiner-2018-fvd} (400-d pre-softmax
+logits); the function \emph{raises} rather than substituting another backbone,
+because a non-comparable FVD is a different quantity with the same name.
+\todo{state final backbone, torch version, and single-GPU (RTX 2000 Ada, 8.6\,GB)
+budget in one paragraph; note gradient checkpointing at 128$\times$128.}
+
+% ===========================================================================
+\section{Experiments}
+\label{sec:exp}
+
+\subsection{Setup}
+% [WRITTEN -- partial]
+Experiments run at $16\times64\times64$ with a small $16\times128\times128$
+showcase set. Clips: synthetic (exact known flow and a controllable scene cut)
+and DAVIS 2017~\cite{pont-tuset-2017-davis} with real per-object masks (coverage
+$0.3\%$--$54.6\%$). Inpainting quality is reported \emph{inside the mask}, with
+coverage alongside: a whole-frame PSNR on a masked task is inflated by roughly
+$-10\log_{10}(\text{coverage})$ (about $9$\,dB at DAVIS's $\sim\!12\%$ mean).
+Masks are resized nearest-neighbour (bicubic pushes annotation values outside
+$[0,1]$).
+\todo{finalise clip list and counts; state seeds (9, 42, 123).}
+
+\subsection{Solver feasibility and GPU scaling}
+\label{sec:solver-results}
+% [WRITTEN -- Table 1 is fully measured; see figures/solver_*.csv]
+Table~\ref{tab:solver} reports the solve cost. On CPU the upwind line solve is
+$26.6\times$ faster than \texttt{spsolve} at $16\times64\times64$ and remains
+tractable where \texttt{spsolve} is not. The GPU port is a net loss below
+$\sim\!64\times64$ (kernel-launch bound) and wins clearly at $128\times128$,
+so the backend defaults to \texttt{auto} and selects NumPy below 96\,px.
+
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{lrrrr}
+    \toprule
+    clip & \texttt{spsolve} & upwind line & \multicolumn{2}{c}{end-to-end (N{=}20)}\\
+    \cmidrule(l){4-5}
+         & (CPU) & speedup & GPU & CPU\,/\,speedup\\
+    \midrule
+    $8\times32\times32$   & 241\,ms    & $3.5\times$  & 12.7\,s & 4.6\,s\,/\,$0.36\times$\\
+    $16\times64\times64$  & 21{,}201\,ms & $\mathbf{26.6\times}$ & 31.1\,s & 42.2\,s\,/\,$1.36\times$\\
+    $16\times128\times128$& intractable & --          & 55.7\,s & 298.5\,s\,/\,$\mathbf{5.36\times}$\\
+    \bottomrule
+  \end{tabular}
+  \caption{FP solve cost (\emph{pre-compute} wall-clock, not sampling). Upwind
+  line relaxation vs.\ sparse direct solve, and end-to-end GPU vs.\ CPU per-clip
+  score pre-compute. Medians of 3, RTX 2000 Ada. Source:
+  \texttt{benchmark\_solver.py}, \texttt{figures/solver\_end\_to\_end.csv}.}
+  \label{tab:solver}
+\end{table}
+
+\subsection{Unconditional stability and its exact cost}
+\label{sec:stab}
+% [WRITTEN -- fully measured; see figures/stencil_summary.json, benchmark_stencil.py]
+Upwinding makes the operator an M-matrix with row-dominance margin \textbf{exactly
+$1.0$ for every configuration}, versus central-difference margins that go
+sharply negative (Table~\ref{tab:stability}). The $\sigma^2\Delta t\le\tfrac12$
+restriction is gone: all configurations across $\sigma\in\{2,5,10,25\}$,
+$N\in\{4,20,50\}$ converge in $4$ outer iterations, including $\sigma{=}25$,
+$N{=}4$ at $\sigma^2\Delta t = 156$.
+
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{rrrrr}
+    \toprule
+    $\sigma$ & $N$ & $|s|$ & upwind margin & central margin\\
+    \midrule
+    2  & 20 & 20  & $1.0000$ & $-4.40$\\
+    5  & 20 & 20  & $1.0000$ & $-32.75$\\
+    25 & 4  & 500 & $1.0000$ & $-116717.75$\\
+    \bottomrule
+  \end{tabular}
+  \caption{Row-dominance margin, upwind vs.\ central. Source:
+  \texttt{validate\_all.py} / \texttt{benchmark\_stencil.py}.}
+  \label{tab:stability}
+\end{table}
+
+The guarantee is not free, and we report the cost exactly. The scheme is
+first-order in space (observed order $0.99$ vs.\ central $2.04$) and injects
+artificial diffusion whose coefficient fits $|v|h/2$ to four digits; reduced to
+config quantities, the \emph{relative} added diffusion is
+\begin{equation}
+  D_{\text{num}}/D = |v|h/(2D) = |s|h/2,
+  \label{eq:artdiff}
+\end{equation}
+in which $g$ (hence $\sigma$) cancels entirely. At the shipped $dh{=}1$ with
+$|s|\!\sim\!1$ this is $\sim\!50\%$ of the physical diffusion -- stated as a cost,
+with $dh$ the only lever (halving $dh$ halves it at $4\times$ solve cost).
+The central scheme loses its M-matrix guarantee at $|s|h\le 2$ and diverges
+between $|s|h=2.6$ and $3.0$.
+
+\subsection{KL keyframe trigger}
+\label{sec:kf-results}
+% [WRITTEN -- fully measured; see figures/keyframe_trigger_measurement.json]
+On 24 frames at $64\times64$ with a cut at frame 12 (Table~\ref{tab:keyframe}),
+the incremental correction is $\mathbf{7.54\times}$ cheaper per frame than
+re-estimation; KL separates the cut from the \emph{worst} within-shot frame by
+$2591\times$ (and from the mean by $33931\times$); it fires zero false positives
+across 23 control frames and detects the cut exactly. ESS moves by only $13\%$
+($0.871\times$) on the identical sequence -- five orders of magnitude less
+discriminative -- which is why the trigger is KL, not ESS.
+
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{lr}
+    \toprule
+    property & measurement\\
+    \midrule
+    cost: incremental vs.\ full re-estimate      & $3.3$ vs.\ $24.5$\,ms $=\mathbf{7.54\times}$\\
+    KL at cut vs.\ mean within-shot              & $3.35\!\times\!10^{-2}$ vs.\ $9.9\!\times\!10^{-7}$ ($33931\times$)\\
+    KL at cut vs.\ \emph{worst} within-shot      & $2591\times$\\
+    false positives (23-frame control)           & $\mathbf{0}$\\
+    detection                                    & fires once, at frame 12\\
+    ESS at cut vs.\ within-shot                  & $0.871\times$ (blind)\\
+    \bottomrule
+  \end{tabular}
+  \caption{Keyframe trigger, three properties measured separately. Source:
+  \texttt{benchmark\_keyframe\_trigger.py},
+  \texttt{figures/keyframe\_trigger\_measurement.json}.}
+  \label{tab:keyframe}
+\end{table}
+
+\subsection{Video inpainting quality}
+\label{sec:inpaint-results}
+% [PARTIAL -- one 60-epoch validation run exists and is a NEGATIVE result.
+%  This subsection must NOT claim quality gains until the full-budget run lands.]
+\textbf{Current status (must be resolved or reported as a negative before
+submission).} At a short training budget the temporal path does \emph{not} yet
+beat a per-frame baseline. On the 60-epoch synthetic validation run
+(\texttt{saves/video/validate60}), masked PSNR is $7.60$/$8.27$\,dB for the
+video model vs.\ $7.68$/$8.38$\,dB per-frame -- i.e.\ $-0.09$\,dB -- and a trivial
+\texttt{copy\_prev} baseline beats both by $\sim\!10$\,dB ($18.1$/$21.8$\,dB).
+This is expected, since temporal layers start at exactly zero contribution, but
+it is a real, unresolved result at this budget; \texttt{run\_video.py} prints a
+warning whenever it holds.
+
+\needsnum{TODO(results): full-training-budget run on DAVIS and synthetic clips.}
+Report, \emph{inside the mask} and at matched wall-clock:
+\begin{itemize}
+  \item masked PSNR/SSIM, masked warping error (flow-warped LPIPS), temporal
+        variation, seam error -- ours vs.\ per-frame (ESS$=1$) vs.\ \texttt{copy\_prev}.
+  \item FVD~\cite{unterthiner-2018-fvd} and per-frame KID~\cite{binkowski-2018-kid}.
+  \item \textbf{The headline claim of this subsection is temporal coherence
+        inside the synthesised region}, so warping error measured inside the
+        mask is the primary number; PSNR is secondary.
+\end{itemize}
+
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{lccccc}
+    \toprule
+    method & mask PSNR$\uparrow$ & mask SSIM$\uparrow$ & mask warp err$\downarrow$ & FVD$\downarrow$ & fit time\\
+    \midrule
+    \texttt{copy\_prev} (trivial)       & \needsnum{--} & \needsnum{--} & \needsnum{--} & n/a & n/a\\
+    per-frame FP (ESS$=1$)              & \needsnum{--} & \needsnum{--} & \needsnum{--} & \needsnum{--} & \needsnum{--}\\
+    DPM-Solver++~\cite{lu-2022-dpmpp}   & \needsnum{--} & \needsnum{--} & \needsnum{--} & \needsnum{--} & \needsnum{--}\\
+    ours (temporal)                     & \needsnum{--} & \needsnum{--} & \needsnum{--} & \needsnum{--} & \needsnum{--}\\
+    \bottomrule
+  \end{tabular}
+  \caption{TODO(results): headline inpainting comparison, matched wall-clock,
+  masked metrics. Numbers pending the full-budget campaign
+  (Sec.~\ref{sec:inpaint-results}).}
+  \label{tab:inpaint}
+\end{table}
+
+\subsection{Ablations}
+\label{sec:ablations}
+% [TODO -- harness exists, campaign not run]
+\todo{run and tabulate the ablation sweep; the harness and configs exist.}
+Planned axes: KL threshold (incl.\ $0$ = always keyframe); warp source
+(RAFT / block-matching / identity); history length $L\in\{1,2,4\}$; stencil
+(upwind / central where stable); grid spacing $dh\in\{1.0,0.5,0.25\}$ (the only
+lever on artificial diffusion, Eq.~\ref{eq:artdiff}); line Gauss--Seidel vs.\
+unsplit reference. The per-frame independent solve (ESS$=1$) is the correct
+internal baseline.
+
+\subsection{User study}
+% [TODO -- deliverable, not yet run]
+\todo{two-alternative forced-choice on temporal stability (ours vs.\ per-frame).
+Design, $n$, and analysis to be added; this is an EG deliverable.}
+
+% ===========================================================================
+\section{Limitations}
+% [WRITTEN -- honest limitations already known]
+\begin{itemize}
+  \item \textbf{First-order solver.} Unconditional stability costs second-order
+        accuracy and adds $|s|h/2$ artificial diffusion (Eq.~\ref{eq:artdiff});
+        $dh$ is the only lever.
+  \item \textbf{Temporal gain at short budgets.} The temporal path does not beat
+        a per-frame baseline at 60 epochs (Sec.~\ref{sec:inpaint-results}); this
+        must be shown resolved at the full budget or reported as a negative.
+  \item \textbf{Global density statistic.} Pixel-value pairs miss purely spatial
+        rearrangements; temporal-pair coordinates are the mitigation.
+  \item \textbf{Cross-clip warm starts do not help.} Measured at $1.12\times$ and
+        removed: upwinding already converges in $4$--$5$ iterations from cold,
+        leaving nothing to save. Recorded so it is not reintroduced.
+  \item \textbf{Scale.} Single 8.6\,GB GPU caps clip size; $32\times256\times256$
+        ($\sim\!3.8$\,h/clip) is out of scope.
+\end{itemize}
+
+% ===========================================================================
+\section{Conclusion}
+% [WRITTEN -- scoped to what is supported]
+We extended per-instance score pre-computation from images to 2D dynamic video.
+The numerical core -- an unconditionally stable upwind FP solver with a measured,
+honestly-reported accuracy cost, and a KL-triggered sequential importance sampler
+that reuses warped densities across frames at $7.5\times$ lower per-frame cost --
+is validated and reproducible. We instantiate it for per-instance video
+inpainting. \todo{one sentence stating the headline quality result once the
+full-budget campaign lands; do not write it until the number exists.}
+
+% ---------------------------------------------------------------------------
+\section*{Acknowledgements}
+\todo{funding and compute acknowledgements.}
+
+% ---------------------------------------------------------------------------
+% EG-KIT: eg-alpha-doi.bst ships with the EG author kit (not vendored here).
+\bibliographystyle{plain}     % EG-KIT: replace with \bibliographystyle{eg-alpha-doi}
+\bibliography{references}
+
+\end{document}

@@ -1,0 +1,402 @@
+% ===========================================================================
+% Bibliography for the Eurographics 2027 full-paper submission.
+%
+% Section A -- reused verbatim from the RRPR/arXiv preprint (References.bib).
+% Section B -- new entries required by the video extension. Entries preceded by
+%              a "TODO(cite): verify" note are placeholders whose bibliographic
+%              details must be confirmed against the canonical source before
+%              submission (year/venue/pages/authors were filled from memory).
+%
+% NOTE: BibTeX has no inline comment syntax INSIDE an entry, and it treats any
+% at-sign as the start of a new entry even in a comment line. Keep every
+% annotation on its own line BEFORE the entry, never on the "type{key," line,
+% and never write an at-sign in a comment.
+% ===========================================================================
+
+% ---------------------------------------------------------------------------
+% Section A: carried over from the image paper
+% ---------------------------------------------------------------------------
+
+@article{hyvarinen-2005,
+    author = {Hyv\"{a}rinen, Aapo},
+    title = {Estimation of Non-Normalized Statistical Models by Score Matching},
+    year = {2005},
+    publisher = {JMLR.org},
+    volume = {6},
+    issn = {1532-4435},
+    journal = {J. Mach. Learn. Res.},
+    month = {dec},
+    pages = {695--709},
+    numpages = {15}
+}
+
+@article{oksendal-1987,
+  title={Stochastic differential equations: an introduction with applications},
+  author={Bernt {\O}ksendal},
+  journal={Journal of the American Statistical Association},
+  year={1987},
+  volume={82},
+  pages={948}
+}
+
+@article{vincent-2011,
+  author={Vincent, Pascal},
+  journal={Neural Computation},
+  title={A Connection Between Score Matching and Denoising Autoencoders},
+  year={2011},
+  volume={23},
+  number={7},
+  pages={1661--1674},
+  doi={10.1162/NECO_a_00142}
+}
+
+@article{na-2023,
+    author = {Na, Andrew S. and Wan, Justin W. L.},
+    title = {Efficient pricing and hedging of high-dimensional American options using deep recurrent networks},
+    journal = {Quantitative Finance},
+    volume = {23},
+    number = {4},
+    pages = {631--651},
+    year  = {2023},
+    publisher = {Routledge},
+    doi = {10.1080/14697688.2023.2167666}
+}
+
+@article{anderson-1982,
+    title = {Reverse-time diffusion equation models},
+    journal = {Stochastic Processes and their Applications},
+    volume = {12},
+    number = {3},
+    pages = {313--326},
+    year = {1982},
+    issn = {0304-4149},
+    doi = {10.1016/0304-4149(82)90051-5},
+    author = {Brian D.O. Anderson}
+}
+
+@misc{kingma-2014,
+    title={Adam: A method for stochastic optimization},
+    author={Kingma, D.P. and Ba, J.},
+    year={2017},
+    eprint={1412.6980},
+    archivePrefix={arXiv}
+}
+
+@inproceedings{vaswani-2017,
+ author = {Vaswani, Ashish and Shazeer, Noam and Parmar, Niki and Uszkoreit, Jakob and Jones, Llion and Gomez, Aidan N and Kaiser, \L ukasz and Polosukhin, Illia},
+ booktitle = {Advances in Neural Information Processing Systems},
+ title = {Attention is All you Need},
+ volume = {30},
+ year = {2017}
+}
+
+@article{ysong-2020,
+  title={Score-Based Generative Modeling through Stochastic Differential Equations},
+  author={Yang Song and Jascha Narain Sohl-Dickstein and Diederik P. Kingma and Abhishek Kumar and Stefano Ermon and Ben Poole},
+  journal={International Conference on Learning Representations (ICLR)},
+  year={2021}
+}
+
+@article{ysong-2020-2,
+  title={Improved Techniques for Training Score-Based Generative Models},
+  author={Yang Song and Stefano Ermon},
+  journal={Advances in Neural Information Processing Systems (NeurIPS)},
+  year={2020}
+}
+
+@inproceedings{ysong-2019,
+  title={Generative Modeling by Estimating Gradients of the Data Distribution},
+  author={Yang Song and Stefano Ermon},
+  booktitle={Advances in Neural Information Processing Systems (NeurIPS)},
+  year={2019}
+}
+
+@article{jsong-2020,
+  title={Denoising Diffusion Implicit Models},
+  author={Jiaming Song and Chenlin Meng and Stefano Ermon},
+  journal={International Conference on Learning Representations (ICLR)},
+  year={2021}
+}
+
+@article{ho-2020,
+  title={Denoising Diffusion Probabilistic Models},
+  author={Jonathan Ho and Ajay Jain and P. Abbeel},
+  journal={Advances in Neural Information Processing Systems (NeurIPS)},
+  year={2020}
+}
+
+@article{pang-2020,
+  title={Efficient Learning of Generative Models via Finite-Difference Score Matching},
+  author={Tianyu Pang and Kun Xu and Chongxuan Li and Yang Song and Stefano Ermon and Jun Zhu},
+  journal={Advances in Neural Information Processing Systems (NeurIPS)},
+  year={2020}
+}
+
+@inproceedings{lai-2022,
+  title={FP-Diffusion: Improving Score-based Diffusion Models by Enforcing the Underlying Score Fokker-Planck Equation},
+  author={Chieh-Hsin Lai and Yuhta Takida and Naoki Murata and Toshimitsu Uesaka and Yuki Mitsufuji and Stefano Ermon},
+  booktitle={International Conference on Machine Learning (ICML)},
+  year={2023}
+}
+
+@article{boffi-2022,
+  title={Probability flow solution of the Fokker--Planck equation},
+  author={Nicholas M. Boffi and Eric Vanden-Eijnden},
+  journal={Machine Learning: Science and Technology},
+  year={2023},
+  volume={4},
+  number={3}
+}
+
+@article{lu-2022,
+  title={{DPM-Solver}: A Fast {ODE} Solver for Diffusion Probabilistic Model Sampling in Around 10 Steps},
+  author={Cheng Lu and Yuhao Zhou and Fan Bao and Jianfei Chen and Chongxuan Li and Jun Zhu},
+  journal={Advances in Neural Information Processing Systems (NeurIPS)},
+  year={2022}
+}
+
+@article{daras-2022,
+  title={Soft Diffusion: Score Matching for General Corruptions},
+  author={Giannis Daras and Mauricio Delbracio and Hossein Talebi and Alexandros G. Dimakis and Peyman Milanfar},
+  journal={Transactions on Machine Learning Research (TMLR)},
+  year={2023}
+}
+
+@article{sohl-dickstein-2015,
+  title={Deep Unsupervised Learning using Nonequilibrium Thermodynamics},
+  author={Jascha Narain Sohl-Dickstein and Eric A. Weiss and Niru Maheswaranathan and Surya Ganguli},
+  journal={International Conference on Machine Learning (ICML)},
+  year={2015}
+}
+
+@article{chen-2018,
+  title={Numerical method for image registration model based on optimal mass transport},
+  author={Yangang Chen and Justin W. L. Wan},
+  journal={Inverse Problems and Imaging},
+  year={2018},
+  volume={12},
+  pages={401--432}
+}
+
+@book{saad-2003,
+  title={Iterative Methods for Sparse Linear Systems},
+  author={Yousef Saad},
+  edition={2nd},
+  publisher={SIAM},
+  year={2003}
+}
+
+@article{ronneberger-2015,
+  title={U-Net: Convolutional Networks for Biomedical Image Segmentation},
+  author={Olaf Ronneberger and Philipp Fischer and Thomas Brox},
+  journal={Medical Image Computing and Computer-Assisted Intervention (MICCAI)},
+  year={2015}
+}
+
+@article{wang-2004,
+  author={Zhou Wang and Bovik, A.C. and Sheikh, H.R. and Simoncelli, E.P.},
+  journal={IEEE Transactions on Image Processing},
+  title={Image quality assessment: from error visibility to structural similarity},
+  year={2004},
+  volume={13},
+  number={4},
+  pages={600--612},
+  doi={10.1109/TIP.2003.819861}
+}
+
+% ---------------------------------------------------------------------------
+% Section B: new entries for the video extension
+% All entries here need a final pass against the canonical source.
+% ---------------------------------------------------------------------------
+
+% --- Numerical analysis: upwinding, M-matrices, line relaxation, ADI ---
+
+% TODO(cite): verify edition/pages
+@book{leveque-2007,
+  title={Finite Difference Methods for Ordinary and Partial Differential Equations: Steady-State and Time-Dependent Problems},
+  author={Randall J. LeVeque},
+  publisher={SIAM},
+  year={2007}
+}
+
+% TODO(cite): verify
+@book{morton-mayers-2005,
+  title={Numerical Solution of Partial Differential Equations: An Introduction},
+  author={K. W. Morton and D. F. Mayers},
+  edition={2nd},
+  publisher={Cambridge University Press},
+  year={2005}
+}
+
+% TODO(cite): verify -- M-matrix / iterative analysis
+@book{varga-2000,
+  title={Matrix Iterative Analysis},
+  author={Richard S. Varga},
+  edition={2nd},
+  publisher={Springer},
+  year={2000}
+}
+
+% TODO(cite): verify pages
+@article{peaceman-rachford-1955,
+  title={The Numerical Solution of Parabolic and Elliptic Differential Equations},
+  author={D. W. Peaceman and H. H. Rachford},
+  journal={Journal of the Society for Industrial and Applied Mathematics},
+  volume={3},
+  number={1},
+  pages={28--41},
+  year={1955}
+}
+
+% --- Optical flow / warping (for motion-aware importance sampling) ---
+
+% TODO(cite): verify pages
+@inproceedings{teed-2020-raft,
+  title={{RAFT}: Recurrent All-Pairs Field Transforms for Optical Flow},
+  author={Zachary Teed and Jia Deng},
+  booktitle={European Conference on Computer Vision (ECCV)},
+  year={2020}
+}
+
+% --- Importance sampling / sequential Monte Carlo (KL trigger, ESS) ---
+
+% TODO(cite): verify
+@book{doucet-2001-smc,
+  title={Sequential Monte Carlo Methods in Practice},
+  author={Arnaud Doucet and Nando de Freitas and Neil Gordon},
+  publisher={Springer},
+  year={2001}
+}
+
+% TODO(cite): verify -- effective sample size origin
+@article{kong-1994-ess,
+  title={Sequential Imputations and Bayesian Missing Data Problems},
+  author={Augustine Kong and Jun S. Liu and Wing Hung Wong},
+  journal={Journal of the American Statistical Association},
+  volume={89},
+  number={425},
+  pages={278--288},
+  year={1994}
+}
+
+% --- Video diffusion baselines / related work ---
+
+% TODO(cite): verify
+@article{ho-2022-video,
+  title={Video Diffusion Models},
+  author={Jonathan Ho and Tim Salimans and Alexey Gritsenko and William Chan and Mohammad Norouzi and David J. Fleet},
+  journal={Advances in Neural Information Processing Systems (NeurIPS)},
+  year={2022}
+}
+
+% TODO(cite): verify
+@article{blattmann-2023-svd,
+  title={Stable Video Diffusion: Scaling Latent Video Diffusion Models to Large Datasets},
+  author={Andreas Blattmann and Tim Dockhorn and Sumith Kulal and others},
+  journal={arXiv preprint arXiv:2311.15127},
+  year={2023}
+}
+
+% --- Few-step / distilled samplers (matched-wall-clock baselines) ---
+
+% TODO(cite): verify
+@inproceedings{song-2023-consistency,
+  title={Consistency Models},
+  author={Yang Song and Prafulla Dhariwal and Mark Chen and Ilya Sutskever},
+  booktitle={International Conference on Machine Learning (ICML)},
+  year={2023}
+}
+
+% TODO(cite): verify
+@inproceedings{liu-2023-rectified,
+  title={Flow Straight and Fast: Learning to Generate and Transfer Data with Rectified Flow},
+  author={Xingchao Liu and Chengyue Gong and Qiang Liu},
+  booktitle={International Conference on Learning Representations (ICLR)},
+  year={2023}
+}
+
+% TODO(cite): verify
+@article{lu-2022-dpmpp,
+  title={{DPM-Solver++}: Fast Solver for Guided Sampling of Diffusion Probabilistic Models},
+  author={Cheng Lu and Yuhao Zhou and Fan Bao and Jianfei Chen and Chongxuan Li and Jun Zhu},
+  journal={arXiv preprint arXiv:2211.01095},
+  year={2022}
+}
+
+% --- Per-instance fitting lineage (justifies the regime) ---
+
+% TODO(cite): verify pages
+@inproceedings{ulyanov-2018-dip,
+  title={Deep Image Prior},
+  author={Dmitry Ulyanov and Andrea Vedaldi and Victor Lempitsky},
+  booktitle={IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
+  year={2018}
+}
+
+% --- Metrics: FVD (I3D), LPIPS, KID ---
+
+% TODO(cite): verify -- FVD / "Towards Accurate Generative Models of Video"
+@article{unterthiner-2018-fvd,
+  title={Towards Accurate Generative Models of Video: A New Metric and Challenges},
+  author={Thomas Unterthiner and Sjoerd van Steenkiste and Karol Kurach and Raphael Marinier and Marcin Michalski and Sylvain Gelly},
+  journal={arXiv preprint arXiv:1812.01717},
+  year={2018}
+}
+
+% TODO(cite): verify pages
+@inproceedings{carreira-2017-i3d,
+  title={Quo Vadis, Action Recognition? A New Model and the Kinetics Dataset},
+  author={Jo{\~a}o Carreira and Andrew Zisserman},
+  booktitle={IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
+  year={2017}
+}
+
+% TODO(cite): verify pages
+@inproceedings{zhang-2018-lpips,
+  title={The Unreasonable Effectiveness of Deep Features as a Perceptual Metric},
+  author={Richard Zhang and Phillip Isola and Alexei A. Efros and Eli Shechtman and Oliver Wang},
+  booktitle={IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
+  year={2018}
+}
+
+% TODO(cite): verify
+@inproceedings{binkowski-2018-kid,
+  title={Demystifying {MMD} {GAN}s},
+  author={Miko{\l}aj Bi{\'n}kowski and Danica J. Sutherland and Michael Arbel and Arthur Gretton},
+  booktitle={International Conference on Learning Representations (ICLR)},
+  year={2018}
+}
+
+% --- DAVIS dataset (evaluation clips + masks) ---
+
+% TODO(cite): verify -- 2017 DAVIS challenge
+@misc{pont-tuset-2017-davis,
+  title={The 2017 {DAVIS} Challenge on Video Object Segmentation},
+  author={Jordi Pont-Tuset and Federico Perazzi and Sergi Caelles and Pablo Arbel{\'a}ez and Alex Sorkine-Hornung and Luc Van Gool},
+  howpublished={arXiv preprint arXiv:1704.00675},
+  year={2017}
+}
+
+% --- (2+1)D factorised spatio-temporal convolution backbone ---
+
+% TODO(cite): verify pages
+@inproceedings{tran-2018-r2plus1d,
+  title={A Closer Look at Spatiotemporal Convolutions for Action Recognition},
+  author={Du Tran and Heng Wang and Lorenzo Torresani and Jamie Ray and Yann LeCun and Manohar Paluri},
+  booktitle={IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
+  year={2018}
+}
+
+% --- Video inpainting related work (zero-shot / internal-learning comparisons) ---
+
+% TODO(cite): verify -- internal-learning video inpainting
+@inproceedings{ouyang-2021-internal,
+  title={Internal Video Inpainting by Implicit Long-range Propagation},
+  author={Hao Ouyang and Tengfei Wang and Qifeng Chen},
+  booktitle={IEEE/CVF International Conference on Computer Vision (ICCV)},
+  year={2021}
+}
+
+% TODO(cite): add at least one recent (2024--2026) video-diffusion inpainting /
+% object-removal method as a clearly-labelled "trained, different setting"
+% context baseline once the target comparison is chosen.
