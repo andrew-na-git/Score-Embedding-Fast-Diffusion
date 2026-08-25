@@ -18,6 +18,12 @@
 #
 # Report masked metrics, never whole-frame ones. At the mean coverage of ~12% a
 # whole-frame PSNR is inflated by about -10*log10(0.12) = 9.2 dB of untouched pixels.
+#
+# NOTE: this file's schema is kept in lock-step with synth_inpaint.yml, which is the
+# reference the code actually reads (run_video.py + train_video.py + network3d.py).
+# The keys below were validated against those readers; do not reintroduce
+# `density_method`, `n_epochs`, a `sampling:` block, or a `model.channels` list --
+# the code reads `kde_method`, `epochs`, `sample:`, and `model.{ch,ch_mult,...}`.
 
 name: davis_inpaint
 
@@ -42,50 +48,78 @@ data_loader:
   num_clips: 70
   stride: 1
   seed: 9
+  # Read by train_video._sample_batch; must live in data_loader, not training.
+  batch_size: 4
 
 diffusion:
-  num_timesteps: 20
   sigma: 5.0
   dh: 1.0
+  num_timesteps: 20
+  solve_tolerance: 1.0e-4
+
   # Upwind is not a free choice: it is first-order in space and adds artificial
   # diffusion of |s|*dh/2 relative to the physical diffusion, but central differencing
   # loses the M-matrix property at |s|*dh > 2 and diverges outright by |s|*dh ~ 3.
   # See benchmark_stencil.py for the measured order (0.99 vs 2.04) and boundary.
   stencil: upwind
-  solve_tolerance: 1.0e-4
-  max_fp_iterations: 100
+  boundary: neumann
+
+  # 'auto' picks numpy below 96 px and the GPU backend at or above it. At this
+  # resolution (64) that resolves to numpy on CPU.
+  backend: auto
+
   inner_tolerance: 1.0e-6
   max_inner_sweeps: 100
-  backend: auto
-  density_method: kde
+  max_fp_iterations: 100
+
+  # Read by density_method_from_config as diffusion.kde_method. 'histogram' is the
+  # sequential-estimator path exercised by every validated run; 'scipy'/'sklearn'
+  # are the exact O(N^2) references and are far slower at 64x64.
+  kde_method: histogram
   estimator:
-    grid_size: 64
-    kl_threshold: 3.0
-    threshold_mode: mad
+    n_bins: 256
+    coarse_bins: 64
+    threshold_mode: adaptive
+    kl_factor: 4.0
+    # Floor is load-bearing. With a purely adaptive median threshold the baseline
+    # collapses to ~1e-6 inside a static shot and the trigger fires on noise; the
+    # floor removed three spurious keyframes on the no-cut control.
+    kl_floor: 1.0e-3
+    history_window: 8
     warmup: 3
 
-model:
-  channels: [32, 64, 128, 128]
-  embed_dim: 128
-  clip_embed_dim: 64
-  frame_embed_dim: 64
-  temporal_mode: factorised
-  # Temporal layers are zero-initialised, so the network starts exactly equal to a
-  # per-frame model and has to earn any temporal contribution. That is the point of
-  # the ablation, and it also means short training budgets will not show a temporal
-  # win -- see the note in PLAN.md 8.3.
-  zero_init_temporal: true
-
 training:
-  n_epochs: 300
-  batch_size: 4
+  epochs: 300
   lr: 1.0e-4
-  timestep_multiplier: 1.0
+  grad_clip: False
+  timestep_multiplier: 1
 
-sampling:
+model:
+  max_positions: 10000
+  in_channels: 3
+  out_channels: 3
+  ch: 64
+  ch_mult: [1, 2, 2]
+  num_res_blocks: 1
+  attention_resolutions: [16, ]
+  dropout: 0.1
+  resample_with_conv: True
+  embedding_method: linear
+
+  # Must be >= data_loader.num_clips; train_video checks and refuses otherwise.
+  num_clips: 70
+  max_frames: 512
+
+  # Temporal layers are zero-initialised, so at init the network is exactly its
+  # spatial counterpart. That also means short training budgets will not show a
+  # temporal win (see PLAN.md 8.3 and the gate sweep in TODO.md 1.1).
+  temporal_attention: True
+
+sample:
+  type: inpaint
   n_steps: 200
-  eps: 1.0e-3
   known_noise: fixed
+  clamp_output: True
   window: 4
   overlap: 1
 
@@ -97,4 +131,4 @@ evaluation:
   compute_fvd: true
 
 misc:
-  eps: 1.0e-5
+  eps: 1.0e-3

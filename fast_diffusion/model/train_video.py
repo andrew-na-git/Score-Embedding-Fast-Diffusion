@@ -252,6 +252,70 @@ def diffuse_train_video(model, dataset, scores, config, save_folder, device=None
     return time.time() - t_start, {"losses": losses}
 
 
+def _score_cache_key(config, clips):
+    """Content hash identifying a score field: clip pixels + everything that
+    changes the FP solve.
+
+    Keyed on the actual clip array rather than the config's clip selection, so it
+    is correct regardless of how the dataset picks clips (two configs that resolve
+    to the same pixels share a cache entry; anything that changes the pixels or the
+    solve misses). The solver/estimator source files are folded in so that editing
+    the solver invalidates stale scores instead of silently reusing them -- the one
+    failure mode that would corrupt a whole campaign.
+
+    The training seed is deliberately NOT in the key: scores do not depend on it,
+    which is exactly what lets a multi-seed campaign reuse one precompute.
+    """
+    import hashlib
+
+    h = hashlib.sha256()
+    h.update(np.ascontiguousarray(clips, dtype=np.float32).tobytes())
+    h.update(json.dumps(config.get("diffusion", {}), sort_keys=True,
+                        default=str).encode())
+    here = os.path.dirname(os.path.abspath(__file__))
+    for name in ("fp_video.py", "fp_torch.py", "density.py", "kfp.py"):
+        try:
+            with open(os.path.join(here, name), "rb") as fh:
+                h.update(fh.read())
+        except OSError:
+            pass
+    return h.hexdigest()[:16]
+
+
+def _load_or_compute_scores(config, dataset, clips, save_folder, device):
+    """Return (scores, info, was_cached).
+
+    Cache is on by default; disable with `diffusion.cache_scores: false` or the
+    `--no-score-cache` flag in run_video.py. Location is `diffusion.score_cache_dir`
+    (default `saves/video/_score_cache`), which is gitignored.
+    """
+    diff = config.get("diffusion", {})
+    if not bool(diff.get("cache_scores", True)):
+        scores, info = score_precompute(config, dataset, save_folder=None, device=device)
+        return scores, info, False
+
+    cache_dir = diff.get("score_cache_dir") or os.path.join(
+        "saves", "video", "_score_cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    key = _score_cache_key(config, clips)
+    spath = os.path.join(cache_dir, key + ".npy")
+    ipath = os.path.join(cache_dir, key + ".info.json")
+
+    if os.path.exists(spath) and os.path.exists(ipath):
+        scores = np.load(spath)
+        with open(ipath, "r", encoding="utf-8") as fh:
+            info = json.load(fh)
+        print(f"  score cache HIT {key} ({scores.nbytes / 1e6:.0f} MB) <- {spath}")
+        return scores, info, True
+
+    scores, info = score_precompute(config, dataset, save_folder=None, device=device)
+    np.save(spath, scores)
+    with open(ipath, "w", encoding="utf-8") as fh:
+        json.dump(info, fh, indent=2)
+    print(f"  score cache MISS {key}; saved {scores.nbytes / 1e6:.0f} MB -> {spath}")
+    return scores, info, False
+
+
 def train_video(config, save_folder, device=None):
     """Full video pipeline: dataset -> score precompute -> fit -> save."""
     from data.VideoDataset import get_video_dataset
@@ -261,13 +325,21 @@ def train_video(config, save_folder, device=None):
     os.makedirs(save_folder, exist_ok=True)
 
     dataset = get_video_dataset(config)
-    np.save(os.path.join(save_folder, "clips.npy"),
-            np.stack([np.asarray(dataset[i]) for i in range(len(dataset))]))
+    clips_arr = np.stack([np.asarray(dataset[i]) for i in range(len(dataset))])
+    np.save(os.path.join(save_folder, "clips.npy"), clips_arr)
 
     print(f"precomputing scores for {len(dataset)} clip(s) on {device}")
     t0 = time.time()
-    scores, score_info = score_precompute(config, dataset, save_folder, device)
+    scores, score_info, was_cached = _load_or_compute_scores(
+        config, dataset, clips_arr, save_folder, device)
     fp_time = time.time() - t0
+
+    # Written for this run's report whether the scores were solved or loaded; on a
+    # cache hit the per-clip solve seconds inside score_info are the originals.
+    score_info = dict(score_info, cached=was_cached)
+    with open(os.path.join(save_folder, "score_precompute.json"), "w",
+              encoding="utf-8") as fh:
+        json.dump(score_info, fh, indent=2)
 
     iters = [r["iterations"] for r in score_info["per_clip"]]
     keys = sum(len(r["keyframe_frames"]) for r in score_info["per_clip"])

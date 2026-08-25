@@ -181,6 +181,8 @@ def main():
     ap.add_argument("--no-train", action="store_true",
                     help="load model.pth from the output directory instead of training")
     ap.add_argument("--skip-baselines", action="store_true")
+    ap.add_argument("--no-score-cache", action="store_true",
+                    help="recompute the FP score field even if a cached one exists")
     ap.add_argument("--seed", type=int, default=None)
     args = ap.parse_args()
 
@@ -197,6 +199,8 @@ def main():
         config["training"]["epochs"] = args.epochs
     if args.n_steps is not None:
         config.setdefault("sample", {})["n_steps"] = args.n_steps
+    if args.no_score_cache:
+        config.setdefault("diffusion", {})["cache_scores"] = False
 
     if args.smoke:
         # Shrink everything that costs time. Kept explicit so a smoke run cannot be
@@ -208,6 +212,7 @@ def main():
             config["diffusion"]["num_timesteps"], 5)
         config["diffusion"]["max_fp_iterations"] = 2
         config.setdefault("sample", {})["n_steps"] = 10
+        config["diffusion"]["cache_scores"] = False  # tiny scores must not touch the cache
         config["smoke_run"] = True
 
     out_dir = args.out_dir or os.path.join("saves", "video", config["name"])
