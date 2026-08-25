@@ -1,0 +1,40 @@
+{
+  // VS Code otherwise traverses and watches ~58,500 files that git already ignores:
+  //   .venv/   46,143 files
+  //   assets/  12,425 files  (DAVIS 2017 is 6,208 frames plus annotations)
+  //
+  // Two separate consequences, and watcherExclude is the one that matters for the
+  // Source Control panel. When DAVIS is first extracted, the file watcher reports
+  // thousands of new paths at once; if that happens before `assets/` is gitignored --
+  // or while the git extension's cache is stale -- the panel exceeds `git.statusLimit`
+  // (default 10,000) and shows "10K" with a "too many changes" state, even though
+  // `git status` itself correctly reports zero. Excluding these paths from the watcher
+  // stops the panel from ever being handed that flood.
+  "files.watcherExclude": {
+    "**/.venv/**": true,
+    "**/assets/**": true,
+    "**/saves/**": true,
+    "**/__pycache__/**": true,
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true
+  },
+
+  // Keep full-text search over the 152 tracked source files rather than 58,500
+  // dependency and dataset files.
+  "search.exclude": {
+    "**/.venv": true,
+    "**/assets": true,
+    "**/saves": true,
+    "**/__pycache__": true
+  },
+
+  // Hidden from the explorer tree only. `assets/` is deliberately NOT hidden here --
+  // browsing the DAVIS sequences and annotations is genuinely useful, and it costs
+  // nothing now that it is out of the watcher.
+  "files.exclude": {
+    "**/.venv": true,
+    "**/__pycache__": true
+  },
+
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe"
+}
