@@ -30,6 +30,7 @@ import numpy as np
 import torch
 
 from .kfp import diffusion_coeff, marginal_prob_std
+from .constraints import project as _project_constraints
 
 # --------------------------------------------------------------------------
 # Masks
@@ -204,6 +205,10 @@ def pf_ode_inpaint(
     known_noise="fixed",
     clamp_output=True,
     seed=None,
+    constraints=None,
+    constraint_weight=1.0,
+    cg_tol=1e-4,
+    cg_maxiter=50,
 ):
     """Probability-flow ODE from t=1 to t=eps with the known region projected in.
 
@@ -230,11 +235,22 @@ def pf_ode_inpaint(
         a flag and must be applied identically to every method being compared. The
         range is taken from the reference rather than assumed to be [0, 1], because
         `VideoDataset` normalises per clip.
+    constraints : optional list of `constraints.LinearConstraint`. When given, the
+        state is projected onto {C x = d} after every Euler step via a matrix-free
+        Krylov (CG) solve, so physical controls (temporal flow-consistency,
+        intensity conservation, ...) guide the fill. The CG dual is warm-started
+        across steps -- the operator barely moves between adjacent steps, so later
+        steps converge in a couple of iterations. `constraint_weight` in (0, 1]
+        scales the projection: 1.0 is the exact projection, smaller values relax it
+        to a softer guidance step. Default None reproduces the unconstrained sampler
+        bit-for-bit. Requires batch size 1 (the per-instance regime).
 
     Returns
     -------
     clip : (B, T, C, H, W) with known pixels equal to `reference` exactly.
-    info : dict with `n_steps`, `nfev`, `known_noise`, `clamped`.
+    info : dict with `n_steps`, `nfev`, `known_noise`, `clamped`, and -- when
+        constraints are active -- `cg_iters` (per-step CG counts) and
+        `cg_iters_total`.
     """
     if seed is not None:
         torch.manual_seed(seed)
@@ -261,6 +277,13 @@ def pf_ode_inpaint(
         + mask_t * torch.randn_like(reference) * std1
 
     nfev = 0
+    if constraints and x.shape[0] != 1:
+        raise ValueError(
+            "constraints require batch size 1 (the per-instance regime); "
+            f"got batch {x.shape[0]}"
+        )
+    warm = None            # CG dual carried across steps (Krylov warm start)
+    cg_iters = []
     for i in range(n_steps):
         t, t_next = float(ts[i]), float(ts[i + 1])
         dt = t_next - t  # negative: integrating backwards in time
@@ -288,6 +311,20 @@ def pf_ode_inpaint(
         g = float(diffusion_coeff(torch.tensor(t), sigma))
         x = x + (-0.5 * g ** 2 * score) * dt
 
+        # Krylov projection onto the physical-constraint set, warm-started across
+        # steps. Operates on the single clip (batch 1); known pixels are restored
+        # by the next step's projection (and the final one below), so this guides
+        # the generated region.
+        if constraints:
+            xc, cinfo = _project_constraints(
+                x[0], constraints, weight=constraint_weight,
+                cg_tol=cg_tol, cg_maxiter=cg_maxiter, warm=warm,
+                free_mask=mask_t[0],
+            )
+            x = xc.unsqueeze(0)
+            warm = cinfo["dual"]
+            cg_iters.append(cinfo["cg_iters"])
+
     if clamp_output:
         x = x.clamp(lo, hi)
 
@@ -295,8 +332,12 @@ def pf_ode_inpaint(
     # and there is no reason to return a noisy version of them. This happens after
     # the clamp so observed pixels are never altered by it.
     x = known * reference + mask_t * x
-    return x.cpu(), {"n_steps": n_steps, "nfev": nfev, "known_noise": known_noise,
-                     "clamped": bool(clamp_output)}
+    info = {"n_steps": n_steps, "nfev": nfev, "known_noise": known_noise,
+            "clamped": bool(clamp_output)}
+    if constraints:
+        info["cg_iters"] = cg_iters
+        info["cg_iters_total"] = int(sum(cg_iters))
+    return x.cpu(), info
 
 
 def autoregressive_inpaint(
@@ -312,6 +353,11 @@ def autoregressive_inpaint(
     known_noise="fixed",
     clamp_output=True,
     seed=None,
+    constraints=None,
+    constraint_weight=1.0,
+    flow_method="blockmatch",
+    cg_tol=1e-4,
+    cg_maxiter=50,
 ):
     """Inpaint a clip in overlapping blocks of frames.
 
@@ -321,10 +367,19 @@ def autoregressive_inpaint(
     seams show up as a temporal discontinuity exactly at the block period, which is
     the obvious failure mode of naive blocked video inpainting.
 
+    `constraints` is an optional `sample.constraints`-style spec (see
+    `constraints.build_constraints`). When set, each block builds its physical
+    constraints from the block's own flows (estimated on the current, partly-filled
+    block by `flow_method`) and passes them to `pf_ode_inpaint`, where the state is
+    Krylov-projected onto {C x = d} every step. The CG dual is warm-started across
+    steps within a block; blocks differ in shape (overlap promotes frames to known)
+    so each block starts its Krylov solve cold.
+
     Returns
     -------
     clip : (T, C, H, W) with observed pixels preserved.
-    info : dict with per-block `nfev`, the block ranges, and mask coverage.
+    info : dict with per-block `nfev`, the block ranges, mask coverage, and -- when
+        constraints are active -- per-block `cg_iters_total`.
     """
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device).eval()
@@ -345,7 +400,7 @@ def autoregressive_inpaint(
     # Frames already solved are promoted to known for subsequent blocks.
     working_mask = mask.copy()
 
-    nfevs, blocks = [], []
+    nfevs, blocks, cg_totals = [], [], []
     start = 0
     step = max(1, window - overlap)
 
@@ -358,6 +413,18 @@ def autoregressive_inpaint(
             start += step
             continue
 
+        # Build this block's physical constraints from its own (partly-filled) flows.
+        block_constraints = None
+        if constraints:
+            from . import constraints as _cmod
+            from .flow import clip_flows
+            flows, valid = clip_flows(
+                block_ref[0].cpu(), method=flow_method, with_mask=True
+            )
+            block_constraints = _cmod.build_constraints(
+                constraints, block_ref[0].cpu(), block_mask, flows, valid
+            )
+
         frame_idx = torch.arange(start, stop, dtype=torch.long)
         filled, info = pf_ode_inpaint(
             model, block_ref, block_mask, sigma, timestep_multiplier,
@@ -365,6 +432,8 @@ def autoregressive_inpaint(
             frame_idx=frame_idx, n_steps=n_steps, eps=eps, device=device,
             known_noise=known_noise, clamp_output=clamp_output,
             seed=None if seed is None else seed + start,
+            constraints=block_constraints, constraint_weight=constraint_weight,
+            cg_tol=cg_tol, cg_maxiter=cg_maxiter,
         )
 
         out[start:stop] = filled[0]
@@ -374,12 +443,13 @@ def autoregressive_inpaint(
         working_mask[start:settled] = 0.0
 
         nfevs.append(info["nfev"])
+        cg_totals.append(info.get("cg_iters_total", 0))
         blocks.append((start, stop))
         if stop >= T:
             break
         start += step
 
-    return out, {
+    out_info = {
         "nfev": nfevs,
         "blocks": blocks,
         "window": window,
@@ -388,6 +458,9 @@ def autoregressive_inpaint(
         "clamped": bool(clamp_output),
         "coverage": mask_coverage(mask),
     }
+    if constraints:
+        out_info["cg_iters_total"] = cg_totals
+    return out, out_info
 
 
 def tests_masked_sampling(verbose=True):

@@ -266,6 +266,11 @@ def main():
             known_noise=scfg.get("known_noise", "fixed"),
             clamp_output=bool(scfg.get("clamp_output", True)),
             seed=config["data_loader"].get("seed", 0),
+            constraints=scfg.get("constraints"),
+            constraint_weight=float(scfg.get("constraint_weight", 1.0)),
+            flow_method=config.get("diffusion", {}).get("flow_method", "blockmatch"),
+            cg_tol=float(scfg.get("cg_tol", 1e-4)),
+            cg_maxiter=int(scfg.get("cg_maxiter", 50)),
         )
         sample_time = time.time() - t0
 
@@ -282,6 +287,8 @@ def main():
         rep["flow_method"] = flow_name
         rep["sample_seconds"] = sample_time
         rep["nfev_total"] = int(sum(info["nfev"]))
+        if info.get("cg_iters_total"):
+            rep["cg_iters_total"] = int(sum(info["cg_iters_total"]))
         rep["method"] = "video"
         rep["clip"] = idx
         # Masked metrics are only comparable within one mask family, so the source

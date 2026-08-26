@@ -1,7 +1,13 @@
 # EUROGRAPHICS 2027 — Submission TODO
 
 Tracking checklist for *Sequential Score Pre-computation for Video Diffusion via
-Upwind Fokker–Planck Solves and KL-Triggered Keyframing*.
+Upwind Fokker–Planck Solves, KL-Triggered Keyframing, and Krylov-Projected
+Physical Control*.
+
+**Scope (contribution framing):** the pipeline is made practical by two
+mechanisms on a stable FP-solver foundation — **(1) importance sampling** (KL
+keyframe SIS) to speed up the KDE score solve, and **(2) a Krylov projection** to
+impose physical control (flow-consistency) on the inpainting. Both are validated.
 
 **Status legend:** `[ ]` open · `[~]` in progress · `[x]` done · **(BLOCKER)** = paper
 cannot be submitted without it.
@@ -18,9 +24,14 @@ nothing implies volumetric/4D support (domain is 2D dynamic video, T×H×W).
 - [x] Solver feasibility: 26.6× over `spsolve` @16×64×64; GPU 5.36× e2e @128² (Table 1)
 - [x] Unconditional stability: M-matrix margin exactly 1.0 (Table 2)
 - [x] Artificial-diffusion cost measured: order 0.99 vs 2.04, `|s|h/2` to 4 digits (Eq. 4)
-- [x] KL keyframe trigger: 7.54× / 2591× / 0 false positives (Table 3)
+- [x] KL keyframe trigger: 7.54× / 2591× / 0 false positives (Table 3) — *speed pillar*
+- [x] Krylov-projected control (flow-consistency): implemented (`constraints.py`,
+      wired into `inpaint.py`, `run_video.py`, config) + validated (`tests_constraints`):
+      adjoints exact (0 / 1e-8 fp32), known-region projection = blend (4.4e-16),
+      masked flow residual 4.97e2 → 1.2e-12, observed pixels bit-exact (drift 0.0),
+      warm start 15 → 3 CG iters (40× lower residual at 3-iter budget) — *control pillar* (Table 5)
 - [x] FVD made comparable (canonical Kinetics-400 I3D)
-- [x] LaTeX skeleton compiles on stock `article` class, 6 pp, 33 refs, 0 warnings
+- [x] LaTeX skeleton compiles on stock `article` class, 7 pp, 37 refs, 0 warnings
 
 ---
 
@@ -60,6 +71,9 @@ nothing implies volumetric/4D support (domain is 2D dynamic video, T×H×W).
 - [ ] Grid spacing dh ∈ {1.0, 0.5, 0.25} (only lever on artificial diffusion)
 - [ ] Line Gauss–Seidel vs unsplit reference
 - [ ] Temporal-pair density coordinates (the global-statistic limitation)
+- [ ] **Krylov control on/off**: masked warping error with vs without flow-consistency
+      projection, at matched wall-clock; sweep `constraint_weight` ∈ {0, 0.5, 1.0}
+      and `cg_maxiter`. (Framework validated; quality effect is the pending number.)
 
 ### 1.4 User study (EG deliverable)
 - [ ] Design 2AFC on temporal stability (ours vs per-frame)
@@ -90,6 +104,9 @@ nothing implies volumetric/4D support (domain is 2D dynamic video, T×H×W).
 - [ ] Verify ~20 Section-B entries tagged `TODO(cite): verify` (year/venue/pages/authors):
       RAFT, FVD, I3D, DAVIS, consistency models, rectified flow, DPM-Solver++,
       Deep Image Prior, R(2+1)D, LPIPS, KID, SMC/ESS, numerics texts
+- [ ] Verify 4 new control-scope entries tagged `TODO(cite): verify`:
+      Saad (iterative methods), Hestenes–Stiefel (CG), RePaint (Lugmayr 2022), DPS (Chung 2023)
+- [ ] Related work: add an optical-flow-consistent video editing/inpainting method as closest prior
 - [ ] Add ≥1 recent video-diffusion inpainting/object-removal method as context baseline
 
 ---

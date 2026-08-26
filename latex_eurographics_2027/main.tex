@@ -60,7 +60,8 @@
 % --- Generic title/author block (compiles under article). ---
 % EG-KIT: replace this whole block with the "EG AUTHOR BLOCK" below it.
 \title{Sequential Score Pre-computation for Video Diffusion via\\
-       Upwind Fokker--Planck Solves and KL-Triggered Keyframing}
+       Upwind Fokker--Planck Solves, KL-Triggered Keyframing,\\
+       and Krylov-Projected Physical Control}
 \author{%
   A.\,S.~Na\thanks{Corresponding author: andrew.na@uwaterloo.ca} \and
   W.~Gao \and M.~Briazkalo \and J.\,W.\,L.~Wan\\
@@ -72,7 +73,8 @@
 % EG-KIT: uncomment the following and delete the generic block above.
 % \title[Sequential Score Pre-computation for Video Diffusion]%
 %       {Sequential Score Pre-computation for Video Diffusion via\\
-%        Upwind Fokker--Planck Solves and KL-Triggered Keyframing}
+%        Upwind Fokker--Planck Solves, KL-Triggered Keyframing,\\
+%        and Krylov-Projected Physical Control}
 % \author[A.\,S.~Na, W.~Gao, M.~Briazkalo \& J.\,W.\,L.~Wan]{%
 %   \parbox{\textwidth}{\centering
 %     A.\,S.~Na\textsuperscript{1}\thanks{Corresponding author: andrew.na@uwaterloo.ca}
@@ -118,7 +120,12 @@ sampling} on the low-dimensional density-estimation coordinates and trigger a
 full re-estimate only when a Kullback--Leibler statistic on the importance
 weights indicates the warped proposal has failed; this incremental correction is
 $7.5\times$ cheaper per frame than re-estimation while detecting scene cuts with
-zero false positives on our control sequence. We instantiate the pipeline for
+zero false positives on our control sequence. Third, we guide the inpainting
+itself with \emph{physical control}: linear constraints---temporal
+flow-consistency foremost---are enforced by projecting the sampler state onto
+the constraint manifold at every integration step, solved matrix-free by a
+warm-started Krylov (conjugate-gradient) iteration on the normal equations, with
+adjoints obtained exactly by automatic differentiation. We instantiate the pipeline for
 per-instance video inpainting / object removal, where fitting to a single clip
 is the accepted methodology and temporal incoherence is the metric of interest.
 \emph{All speedups are fitting/pre-compute wall-clock, not sampling.}
@@ -128,7 +135,8 @@ is the accepted methodology and temporal incoherence is the metric of interest.
 % the abstract. Uncomment it there and delete this \keywords line at submission.
 \medskip\noindent\textbf{CCS Concepts / Keywords:}
 video diffusion; per-instance fitting; Fokker--Planck; upwind finite differences;
-M-matrix stability; sequential importance sampling; video inpainting.
+M-matrix stability; sequential importance sampling; constrained sampling;
+Krylov projection; video inpainting.
 % \begin{classification} % https://www.acm.org/publications/class-2012
 % \CCScat{Computing methodologies}{Computer graphics}{Image manipulation}{Computational photography}
 % \CCScat{Mathematics of computing}{Numerical analysis}{Partial differential equations}{}
@@ -171,18 +179,28 @@ speedup is \emph{fitting/pre-compute} wall-clock, never sampling. We state this
 in the abstract, here, and in every table caption, because the distinction is
 easy to lose.
 
-\medskip\noindent\textbf{Contributions.}
+\medskip\noindent\textbf{Contributions.} The pipeline is made practical by two
+mechanisms---\emph{importance sampling} for speed and a \emph{Krylov projection}
+for control---on the numerical foundation of a stable FP solver:
 \begin{enumerate}
   \item An \textbf{unconditionally stable} video FP solver: an upwind
         discretisation solved by full-diagonal line Gauss--Seidel, proven an
         M-matrix in practice (dominance margin exactly $1.0$ across all tested
         $\sigma$, $N$, $|s|$), matching the unsplit solve to $4.6\times10^{-9}$.
         We quantify its first-order accuracy cost exactly (Sec.~\ref{sec:stab}).
-  \item A \textbf{KL-triggered sequential importance sampler} that reuses the
+  \item \textbf{Speed --- a KL-triggered sequential importance sampler} that
+        accelerates the KDE-based score solve: it reuses the
         previous frame's converged density as a motion-warped proposal and
         re-estimates only on demand, $7.5\times$ cheaper per frame than
         per-frame re-estimation, with a keyframe rule that is interpretable as a
         scene-cut / disocclusion detector (Sec.~\ref{sec:keyframe}).
+  \item \textbf{Control --- a Krylov-projected constraint framework} that guides
+        the inpainting: physical linear constraints $Cx=d$ (temporal
+        flow-consistency foremost) are imposed by projecting the sampler state
+        onto the constraint manifold each step, solved matrix-free by
+        conjugate gradients on the SPD normal equations with automatic-
+        differentiation adjoints and warm starts across steps. We validate the
+        projection numerically (Sec.~\ref{sec:control-results}).
   \item A per-instance \textbf{video inpainting} instantiation with masked,
         motion-compensated evaluation, and an honest account of where the
         temporal path does and does not yet help (Sec.~\ref{sec:exp}).
@@ -224,8 +242,20 @@ same-category comparison~\cite{ouyang-2021-internal}.}
 principle are standard~\cite{leveque-2007,morton-mayers-2005,varga-2000}; line
 relaxation and ADI descend from~\cite{peaceman-rachford-1955}. Sequential
 importance sampling and effective sample size come from the SMC
-literature~\cite{doucet-2001-smc,kong-1994-ess}. Motion fields use
+literature~\cite{doucet-2001-smc,kong-1994-ess}. Krylov subspace methods and
+warm-started conjugate gradients on the normal equations are
+classical~\cite{saad-2003-iterative,hestenes-1952-cg}. Motion fields use
 RAFT~\cite{teed-2020-raft}.
+
+\noindent\textbf{Constrained and guided sampling.} A parallel line conditions
+diffusion samplers on measurements or physical priors---replacement/projection
+inpainting~\cite{lugmayr-2022-repaint}, diffusion posterior
+sampling and its manifold-constrained variants~\cite{chung-2023-dps}. We differ
+by treating the guidance as an \emph{explicit linear projection} onto $\{Cx=d\}$
+solved matrix-free by a Krylov iteration, rather than a score-space gradient,
+which makes the known-region constraint exact and composes arbitrary physical
+constraints without retraining. \todo{cite: verify RePaint, DPS/MCG, and one
+optical-flow-consistent video editing/inpainting method as the closest prior.}
 
 % ===========================================================================
 \section{Background: score pre-computation}
@@ -355,6 +385,47 @@ $0.0$) -- ``no temporal layers'' is therefore a genuine ablation baseline.
 Sampling for inpainting uses a fixed-step probability-flow integrator that
 projects the known region back \emph{between} steps (a black-box \texttt{solve\_ivp}
 exposes no hook for this and lets the known region drift).
+
+\subsection{Krylov-projected physical control}
+\label{sec:control}
+% [WRITTEN -- implemented and numerically validated; see constraints.py]
+The known-region projection above is one instance of a general operation:
+enforcing a linear constraint $Cx=d$ on the sampler state $x$ (one clip,
+$T\times C\times H\times W$). We expose that operation directly. After each Euler
+step we project $x$ onto the constraint manifold,
+\begin{equation}
+  x \;\leftarrow\; x - w\,C^{\!\top}(C C^{\!\top})^{-1}(Cx-d),
+  \qquad 0<w\le 1,
+  \label{eq:proj}
+\end{equation}
+where $w{=}1$ is the exact orthogonal projection and $w{<}1$ relaxes it to a
+guidance step. The normal-equations system $(CC^{\!\top})y=Cx-d$ is symmetric
+positive (semi-)definite and is solved \textbf{matrix-free by conjugate
+gradients}: only the actions $Cv$ and $C^{\!\top}v$ are ever formed. Each
+constraint supplies only its forward map $C$; the adjoint $C^{\!\top}$ is
+obtained \emph{exactly} as the vector--Jacobian product of $C$ by automatic
+differentiation, so a hand-coded and possibly inconsistent transpose---which
+would make the projection silently non-orthogonal---is never required.
+
+\medskip\noindent\textbf{Flow-consistency (the flagship constraint).} For each
+frame pair the generated content should agree with the motion-compensated
+previous frame,
+\begin{equation}
+  x[t] \;=\; \mathrm{warp}\big(x[t{-}1],\,\phi_{t\to t-1}\big)
+  \quad\text{on unknown, flow-valid pixels,}
+  \label{eq:flowc}
+\end{equation}
+with $\phi$ estimated on the observed clip and the residual gated by the
+forward--backward validity mask so disoccluded pixels are dropped. $\mathrm{warp}$
+is bilinear resampling and hence linear in $x$, so \eqref{eq:flowc} is a genuine
+linear constraint that couples adjacent frames; two further constraints
+(known-region equality, per-channel intensity conservation) compose additively.
+Because the constraint couples frames, its operator barely changes between
+consecutive sampler steps, so the CG dual is \textbf{warm-started} across steps.
+A per-frame \emph{free mask} confines the update in \eqref{eq:proj} to the
+generated pixels, leaving observed data bit-exact while still using it to inform
+the fill. Temporal coherence is thereby enforced \emph{by projection}, not by a
+soft penalty in the loss.
 
 % ===========================================================================
 \section{Implementation}
@@ -488,6 +559,48 @@ discriminative -- which is why the trigger is KL, not ESS.
   \label{tab:keyframe}
 \end{table}
 
+\subsection{Krylov-projected control: validation}
+\label{sec:control-results}
+% [WRITTEN -- fully measured; see fast_diffusion/model/constraints.py :: tests_constraints]
+The projection (Sec.~\ref{sec:control}) is validated on properties that hold
+independently of any trained network (Table~\ref{tab:control}). The
+autodifferentiated adjoints satisfy $\langle Cx,v\rangle=\langle x,C^{\!\top}v\rangle$
+to machine precision ($0$ for the pixel-selection constraints; $10^{-8}$ for
+flow-consistency, limited only by the \texttt{float32} sampling grid of the warp).
+The known-region projection reproduces the sampler's explicit blend to
+$4.4\times10^{-16}$. On a synthetic clip with exact ground-truth translation flow,
+the projection drives the masked flow residual from $4.97\times10^{2}$ to
+$1.2\times10^{-12}$ while leaving observed pixels \emph{bit-exact} (drift $0.0$),
+confirming the free-mask restriction. Warm-starting is effective in the regime it
+targets: re-solving a repeated system from the previous dual falls from $15$ to
+$3$ CG iterations, and under a fixed $3$-iteration budget---how it runs inside the
+sampler---the warm start reaches a $40\times$ smaller residual ($1.3\times10^{-1}$
+cold vs.\ $3.3\times10^{-3}$ warm).
+\todo{once the full-budget campaign lands, add the \emph{quality} effect of the
+flow-consistency projection: masked warping error with vs.\ without control at
+matched wall-clock, as an ablation row in Table~\ref{tab:inpaint}.}
+
+\begin{table}[t]
+  \centering
+  \small
+  \begin{tabular}{lr}
+    \toprule
+    property & measurement\\
+    \midrule
+    adjoint exactness (selection constraints)   & $0$\\
+    adjoint exactness (flow-consistency)         & $1.0\times10^{-8}$ (\texttt{fp32} grid)\\
+    known-region projection vs.\ explicit blend  & $4.4\times10^{-16}$\\
+    masked flow residual, before / after         & $4.97\!\times\!10^{2}\to1.2\!\times\!10^{-12}$\\
+    observed-pixel drift under projection         & $\mathbf{0.0}$ (bit-exact)\\
+    warm start: repeated-solve CG iters           & $15\to\mathbf{3}$\\
+    warm start: residual at $3$-iter budget       & $1.3\!\times\!10^{-1}\to3.3\!\times\!10^{-3}$\\
+    \bottomrule
+  \end{tabular}
+  \caption{Krylov-projected control, validated without a trained network. Source:
+  \texttt{fast\_diffusion/model/constraints.py} (\texttt{tests\_constraints}).}
+  \label{tab:control}
+\end{table}
+
 \subsection{Video inpainting quality}
 \label{sec:inpaint-results}
 % [PARTIAL -- one 60-epoch validation run exists and is a NEGATIVE result.
@@ -560,9 +673,18 @@ Design, $n$, and analysis to be added; this is an EG deliverable.}
         must be shown resolved at the full budget or reported as a negative.
   \item \textbf{Global density statistic.} Pixel-value pairs miss purely spatial
         rearrangements; temporal-pair coordinates are the mitigation.
-  \item \textbf{Cross-clip warm starts do not help.} Measured at $1.12\times$ and
-        removed: upwinding already converges in $4$--$5$ iterations from cold,
-        leaving nothing to save. Recorded so it is not reintroduced.
+  \item \textbf{Cross-clip solver warm starts do not help.} Measured at
+        $1.12\times$ and removed: upwinding already converges in $4$--$5$
+        iterations from cold, leaving nothing to save. This concerns the
+        \emph{FP-solver} initial guess and is distinct from the sampler-side
+        Krylov \emph{control} (Sec.~\ref{sec:control}), whose warm start reuses
+        the constraint dual across integration steps, not clips. Recorded so the
+        solver warm start is not reintroduced.
+  \item \textbf{Control quality effect pending.} The Krylov projection is
+        validated numerically (Sec.~\ref{sec:control-results}), but its effect on
+        inpainting \emph{quality} (masked warping error with vs.\ without control)
+        awaits the full-budget campaign and must be reported as an ablation, not
+        assumed.
   \item \textbf{Scale.} Single 8.6\,GB GPU caps clip size; $32\times256\times256$
         ($\sim\!3.8$\,h/clip) is out of scope.
 \end{itemize}
@@ -574,7 +696,10 @@ We extended per-instance score pre-computation from images to 2D dynamic video.
 The numerical core -- an unconditionally stable upwind FP solver with a measured,
 honestly-reported accuracy cost, and a KL-triggered sequential importance sampler
 that reuses warped densities across frames at $7.5\times$ lower per-frame cost --
-is validated and reproducible. We instantiate it for per-instance video
+is validated and reproducible. On top of it, a matrix-free Krylov projection
+imposes physical linear constraints (temporal flow-consistency foremost) on the
+inpainting sampler, giving explicit, composable control that we validate
+numerically. We instantiate the pipeline for per-instance video
 inpainting. \todo{one sentence stating the headline quality result once the
 full-budget campaign lands; do not write it until the number exists.}
 
