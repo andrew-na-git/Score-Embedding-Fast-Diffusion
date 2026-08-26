@@ -254,8 +254,12 @@ sampling and its manifold-constrained variants~\cite{chung-2023-dps}. We differ
 by treating the guidance as an \emph{explicit linear projection} onto $\{Cx=d\}$
 solved matrix-free by a Krylov iteration, rather than a score-space gradient,
 which makes the known-region constraint exact and composes arbitrary physical
-constraints without retraining. \todo{cite: verify RePaint, DPS/MCG, and one
-optical-flow-consistent video editing/inpainting method as the closest prior.}
+constraints without retraining. The per-step correction is a minimum-effort
+control whose KKT/saddle system and its Tikhonov-regularised reduction are
+standard in PDE-constrained optimisation and equality-constrained least
+squares~\cite{nocedal-2006-numopt,benzi-2005-saddle}. \todo{cite: verify RePaint,
+DPS/MCG, and one optical-flow-consistent video editing/inpainting method as the
+closest prior.}
 
 % ===========================================================================
 \section{Background: score pre-computation}
@@ -312,6 +316,33 @@ temporal axis, leaks density \emph{across frame boundaries}, producing exactly
 the flicker a graphics reviewer looks for. A direct sparse solve
 (\texttt{spsolve}) on $T\cdot H\cdot W$ unknowns is intractable at useful
 resolutions, so we solve by line relaxation.
+
+\medskip\noindent\textbf{Operator assembly.} Writing $v=f-\tfrac12 g^2 s$ for the
+drift, $D=\tfrac12 g^2$ for the diffusivity, and using the callers' scalings
+$dh=\Delta t/(2h)$ and $dh_2=\Delta t/h^2$, the unsplit operator decomposes by
+direction as $A = A_{\text{diag}} + \sum_{a} A_a$, one tridiagonal term $A_a$ per
+axis $a\in\{x\text{-value},\,y\text{-value},\,t\}$. Two assembly conventions are
+load-bearing, and getting either wrong is silently fatal:
+\begin{itemize}
+  \item \textbf{Node indexing.} Row $p$ must draw \emph{all} its coefficients from
+        node $p$ ($A[p,p{+}1]=a_p$). Neighbour-indexed assembly
+        ($A[p,p{+}1]=a_{p+1}$) mixes three nodes' drift values into one row, so the
+        sign of $v$ that selects the upwind direction for row $p$ is not the sign
+        used to build that row---upwinding becomes meaningless and no row-wise
+        dominance statement holds. This single convention moves the measured
+        margin from $-89.3$ to exactly $1.0$.
+  \item \textbf{Diagonal ownership.} Each tridiagonal factor must keep the
+        \emph{full} operator diagonal ($1+n_{\text{dir}}\,\text{diag\_extra}$ plus
+        boundary folds), with the other directions' off-diagonals moved to the
+        right-hand side. Giving each factor only $1+\text{diag\_extra}$ leaves the
+        remainder carrying $2\,\text{diag\_extra}$, driving the iteration-matrix
+        norm toward $2$ and diverging for all but tiny $\Delta t$; with the full
+        diagonal the remainder ratio is
+        $2\,\text{diag\_extra}/(1+2\,\text{diag\_extra})<1$ unconditionally.
+\end{itemize}
+Boundary conditions are applied as Neumann folds on the true three-axis grid, not
+the flattened index space; the temporal axis in particular must not wrap, or
+density leaks between the first and last frames.
 
 \subsection{Upwind stencil and line Gauss--Seidel}
 % [WRITTEN]
@@ -390,22 +421,81 @@ exposes no hook for this and lets the known region drift).
 \label{sec:control}
 % [WRITTEN -- implemented and numerically validated; see constraints.py]
 The known-region projection above is one instance of a general operation:
-enforcing a linear constraint $Cx=d$ on the sampler state $x$ (one clip,
-$T\times C\times H\times W$). We expose that operation directly. After each Euler
-step we project $x$ onto the constraint manifold,
+enforcing a linear constraint $Cx=d$ on the sampler state. We expose that
+operation directly and cast it as a small \emph{control problem} solved at every
+integration step. Given the score-driven prediction $x$ (one clip,
+$T\times C\times H\times W$), we seek the minimum-effort correction---a
+\emph{control} $u$---that steers the state onto the physical constraints:
 \begin{equation}
-  x \;\leftarrow\; x - w\,C^{\!\top}(C C^{\!\top})^{-1}(Cx-d),
-  \qquad 0<w\le 1,
-  \label{eq:proj}
+  \min_{u}\ \tfrac12\,u^{\!\top} W u
+  \quad\text{s.t.}\quad C(x+u)=d,
+  \label{eq:control-hard}
 \end{equation}
-where $w{=}1$ is the exact orthogonal projection and $w{<}1$ relaxes it to a
-guidance step. The normal-equations system $(CC^{\!\top})y=Cx-d$ is symmetric
-positive (semi-)definite and is solved \textbf{matrix-free by conjugate
-gradients}: only the actions $Cv$ and $C^{\!\top}v$ are ever formed. Each
-constraint supplies only its forward map $C$; the adjoint $C^{\!\top}$ is
+with a positive-definite control-cost metric $W$. The Lagrangian
+$\tfrac12 u^{\!\top}Wu + y^{\!\top}(C(x+u)-d)$ gives the KKT (augmented, saddle)
+system
+\begin{equation}
+  \begin{bmatrix} W & C^{\!\top}\\ C & 0 \end{bmatrix}
+  \begin{bmatrix} u \\ y \end{bmatrix}
+  =
+  \begin{bmatrix} 0 \\ d-Cx \end{bmatrix},
+  \label{eq:kkt}
+\end{equation}
+whose elimination $u=-W^{-1}C^{\!\top}y$ yields the reduced normal system
+\begin{equation}
+  \big(C\,W^{-1}C^{\!\top}\big)\,y \;=\; Cx-d,
+  \qquad u=-W^{-1}C^{\!\top}y.
+  \label{eq:reduced}
+\end{equation}
+With $W=I$ this is the orthogonal projection
+$x\leftarrow x-C^{\!\top}(CC^{\!\top})^{-1}(Cx-d)$. Crucially, the per-frame
+\emph{free mask} that confines the correction to generated pixels \emph{is} the
+control metric: $W^{-1}=\mathrm{diag}(\text{free})$ assigns zero mobility
+(infinite control cost) to observed pixels, so \eqref{eq:reduced} never moves
+data yet still reads it through $C$ to inform the fill.
+
+\medskip\noindent\textbf{Augmentation: regularised (soft) control.} Real
+constraints are only approximately satisfiable---estimated flow is noisy and
+disoccluded pixels have no valid correspondence---so an exact projection can
+inject the constraint's own error. We therefore augment \eqref{eq:control-hard}
+with a fidelity term of weight $\lambda$,
+\begin{equation}
+  \min_{u}\ \tfrac12\,u^{\!\top} W u
+  + \tfrac{1}{2\lambda}\,\big\|C(x+u)-d\big\|_2^2,
+  \label{eq:control-soft}
+\end{equation}
+whose reduced system is the Tikhonov-regularised
+\begin{equation}
+  \big(C\,W^{-1}C^{\!\top} + \lambda^{-1} I\big)\,y \;=\; Cx-d .
+  \label{eq:reduced-ridge}
+\end{equation}
+The ridge $\lambda^{-1}$ (i) trades constraint fidelity for smaller control
+effort, so an unreliable constraint no longer dominates; (ii) shifts the spectrum
+by $\lambda^{-1}$, tightening the condition number and accelerating the iterative
+solve; and (iii) recovers the exact projection \eqref{eq:reduced} as
+$\lambda^{-1}\!\to\!0$. Equations \eqref{eq:reduced} and \eqref{eq:reduced-ridge}
+are symmetric positive (semi-)definite and are solved \textbf{matrix-free by
+conjugate gradients}: only the actions $Cv$ and $C^{\!\top}v$ are ever formed.
+Each constraint supplies only its forward map $C$; the adjoint $C^{\!\top}$ is
 obtained \emph{exactly} as the vector--Jacobian product of $C$ by automatic
-differentiation, so a hand-coded and possibly inconsistent transpose---which
-would make the projection silently non-orthogonal---is never required.
+differentiation, so a hand-coded, possibly inconsistent transpose---which would
+make the projection silently non-orthogonal---is never required. Because the
+constraint operator barely changes between adjacent steps, the CG dual $y$ is
+\textbf{warm-started} across steps (Fig.~\ref{fig:cg}).
+
+\begin{algorithm}[t]
+\caption{Controlled PF-ODE inpainting step (constraints active).}
+\label{alg:control}
+\begin{algorithmic}
+\Require state $x$, constraints $\{C_i,d_i\}$, metric $W^{-1}{=}\mathrm{diag(free)}$,
+         ridge $\lambda^{-1}$, weight $w$, previous dual $y_{\text{prev}}$
+\State project known region; evaluate score; take the Euler step on $x$
+\State assemble $r \gets Cx-d$ \Comment{residuals stacked over constraints}
+\State solve $(C W^{-1}C^{\!\top} + \lambda^{-1}I)\,y = r$ by CG, warm-started at $y_{\text{prev}}$
+\State $u \gets W^{-1}C^{\!\top}y$;\quad $x \gets x - w\,u$ \Comment{apply control}
+\State \Return $x$, dual $y$ \Comment{$y$ seeds the next step}
+\end{algorithmic}
+\end{algorithm}
 
 \medskip\noindent\textbf{Flow-consistency (the flagship constraint).} For each
 frame pair the generated content should agree with the motion-compensated
@@ -419,13 +509,9 @@ with $\phi$ estimated on the observed clip and the residual gated by the
 forward--backward validity mask so disoccluded pixels are dropped. $\mathrm{warp}$
 is bilinear resampling and hence linear in $x$, so \eqref{eq:flowc} is a genuine
 linear constraint that couples adjacent frames; two further constraints
-(known-region equality, per-channel intensity conservation) compose additively.
-Because the constraint couples frames, its operator barely changes between
-consecutive sampler steps, so the CG dual is \textbf{warm-started} across steps.
-A per-frame \emph{free mask} confines the update in \eqref{eq:proj} to the
-generated pixels, leaving observed data bit-exact while still using it to inform
-the fill. Temporal coherence is thereby enforced \emph{by projection}, not by a
-soft penalty in the loss.
+(known-region equality, per-channel intensity conservation) compose additively as
+extra block rows of $C$. Temporal coherence is thereby enforced \emph{by control},
+not by a soft penalty added to the training loss.
 
 % ===========================================================================
 \section{Implementation}
@@ -575,10 +661,25 @@ confirming the free-mask restriction. Warm-starting is effective in the regime i
 targets: re-solving a repeated system from the previous dual falls from $15$ to
 $3$ CG iterations, and under a fixed $3$-iteration budget---how it runs inside the
 sampler---the warm start reaches a $40\times$ smaller residual ($1.3\times10^{-1}$
-cold vs.\ $3.3\times10^{-3}$ warm).
+cold vs.\ $3.3\times10^{-3}$ warm; Fig.~\ref{fig:cg}). The regularised-control
+augmentation \eqref{eq:reduced-ridge} behaves as designed: a ridge of $0.5$ cuts
+the control effort $\|u\|$ from $16.9$ to $12.1$ and the CG iterations from $20$
+to $15$, and reproduces the hard projection bit-for-bit at $\lambda^{-1}{=}0$.
 \todo{once the full-budget campaign lands, add the \emph{quality} effect of the
-flow-consistency projection: masked warping error with vs.\ without control at
-matched wall-clock, as an ablation row in Table~\ref{tab:inpaint}.}
+flow-consistency control: masked warping error with vs.\ without control (and a
+$\lambda^{-1}$ sweep) at matched wall-clock, as ablation rows in
+Table~\ref{tab:inpaint}.}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.85\linewidth]{krylov_control_convergence.pdf}
+  \caption{CG convergence of the control solve \eqref{eq:reduced}. Warm-starting
+  from the previous step's dual begins two orders below cold; the regularised
+  operator \eqref{eq:reduced-ridge} is better conditioned and converges faster
+  than cold at every early iteration. Source:
+  \texttt{benchmark\_krylov\_control.py}.}
+  \label{fig:cg}
+\end{figure}
 
 \begin{table}[t]
   \centering
@@ -591,9 +692,11 @@ matched wall-clock, as an ablation row in Table~\ref{tab:inpaint}.}
     adjoint exactness (flow-consistency)         & $1.0\times10^{-8}$ (\texttt{fp32} grid)\\
     known-region projection vs.\ explicit blend  & $4.4\times10^{-16}$\\
     masked flow residual, before / after         & $4.97\!\times\!10^{2}\to1.2\!\times\!10^{-12}$\\
-    observed-pixel drift under projection         & $\mathbf{0.0}$ (bit-exact)\\
+    observed-pixel drift under control            & $\mathbf{0.0}$ (bit-exact)\\
     warm start: repeated-solve CG iters           & $15\to\mathbf{3}$\\
     warm start: residual at $3$-iter budget       & $1.3\!\times\!10^{-1}\to3.3\!\times\!10^{-3}$\\
+    ridge $0.5$: control effort $\|u\|$           & $16.9\to12.1$\\
+    ridge $0.5$: CG iters (conditioning)          & $20\to15$\\
     \bottomrule
   \end{tabular}
   \caption{Krylov-projected control, validated without a trained network. Source:

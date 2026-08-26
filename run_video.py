@@ -271,6 +271,7 @@ def main():
             flow_method=config.get("diffusion", {}).get("flow_method", "blockmatch"),
             cg_tol=float(scfg.get("cg_tol", 1e-4)),
             cg_maxiter=int(scfg.get("cg_maxiter", 50)),
+            constraint_ridge=float(scfg.get("constraint_ridge", 0.0)),
         )
         sample_time = time.time() - t0
 

@@ -209,6 +209,7 @@ def pf_ode_inpaint(
     constraint_weight=1.0,
     cg_tol=1e-4,
     cg_maxiter=50,
+    constraint_ridge=0.0,
 ):
     """Probability-flow ODE from t=1 to t=eps with the known region projected in.
 
@@ -319,7 +320,7 @@ def pf_ode_inpaint(
             xc, cinfo = _project_constraints(
                 x[0], constraints, weight=constraint_weight,
                 cg_tol=cg_tol, cg_maxiter=cg_maxiter, warm=warm,
-                free_mask=mask_t[0],
+                free_mask=mask_t[0], ridge=constraint_ridge,
             )
             x = xc.unsqueeze(0)
             warm = cinfo["dual"]
@@ -358,6 +359,7 @@ def autoregressive_inpaint(
     flow_method="blockmatch",
     cg_tol=1e-4,
     cg_maxiter=50,
+    constraint_ridge=0.0,
 ):
     """Inpaint a clip in overlapping blocks of frames.
 
@@ -433,7 +435,7 @@ def autoregressive_inpaint(
             known_noise=known_noise, clamp_output=clamp_output,
             seed=None if seed is None else seed + start,
             constraints=block_constraints, constraint_weight=constraint_weight,
-            cg_tol=cg_tol, cg_maxiter=cg_maxiter,
+            cg_tol=cg_tol, cg_maxiter=cg_maxiter, constraint_ridge=constraint_ridge,
         )
 
         out[start:stop] = filled[0]

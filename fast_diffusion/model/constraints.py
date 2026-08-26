@@ -203,24 +203,38 @@ def _cg(matvec, b, x0=None, tol=1e-4, maxiter=50):
 
 
 def project(x, constraints, weight=1.0, cg_tol=1e-4, cg_maxiter=50, warm=None,
-            free_mask=None):
-    """Project a clip x (T,C,H,W) onto {C x = d} for a list of linear constraints.
+            free_mask=None, ridge=0.0):
+    """Project a clip x (T,C,H,W) onto {C x = d}, as a constrained control step.
 
-    Solves (C Cᵀ) y = C x - d matrix-free by CG (warm-started from `warm`), then
-    returns ``x - weight * Cᵀ y`` and an info dict carrying the dual `y` for the
-    next call's warm start plus the CG iteration count.
+    Each sampler step chooses a minimum-effort control (correction) ``u`` that
+    steers the state onto the physical constraints:
 
-    weight < 1 turns the exact projection into a softer guidance step, which is
-    the safer default when constraints are only approximately satisfiable (real
-    flow, disocclusion).
+        min_u  1/2 uᵀ W u   s.t.  C(x+u) = d      (hard control)
 
-    free_mask : optional (T,1,H,W) (broadcastable) with 1 on pixels the projection
-        is allowed to move. When given, the update is confined to those pixels --
-        the reduced projection that treats the complement (observed data) as fixed.
-        This keeps known pixels bit-exact and makes coupling constraints (whose
-        adjoint would otherwise scatter into a neighbour frame's observed pixels)
-        guide only the generated region. `apply(x)` still sees the full clip, so
-        observed content correctly informs the fill.
+    whose KKT system, after eliminating ``u = -W⁻¹Cᵀ y``, is the reduced normal
+    system ``(C W⁻¹ Cᵀ) y = C x - d`` with ``u = -W⁻¹Cᵀ y``. Here ``free_mask``
+    *is* the control metric: ``W⁻¹ = diag(free_mask)`` (zero mobility, i.e.
+    infinite control cost, on observed pixels), so the update never moves data.
+
+    `ridge` >= 0 is the **regularised (soft) control** augmentation. It solves
+
+        min_u  1/2 uᵀ W u + 1/(2 ridge) ‖C(x+u) - d‖²
+
+    giving ``(C W⁻¹ Cᵀ + ridge·I) y = C x - d``. It (i) handles *inconsistent*
+    constraints (noisy block-match flow, disocclusion) gracefully, (ii) improves
+    conditioning so warm-started CG converges faster, and (iii) recovers the exact
+    projection as ``ridge -> 0``. `ridge=0` reproduces the hard projection
+    bit-for-bit.
+
+    Solved matrix-free by CG (warm-started from `warm`); returns ``x - weight·u``
+    and an info dict carrying the dual `y` for the next warm start and the CG
+    iteration count. `weight` < 1 damps the applied control (a softer step); it is
+    orthogonal to `ridge`, which reshapes the solve itself.
+
+    free_mask : optional (T,1,H,W) (broadcastable) with 1 on pixels the control is
+        allowed to move -- the metric W⁻¹ above. Keeps observed pixels bit-exact
+        and confines coupling constraints to the generated region; `apply(x)` still
+        sees the full clip, so observed content informs the fill.
     """
     if not constraints:
         return x, {"cg_iters": 0, "cg_rel": 0.0, "dual": warm}
@@ -228,7 +242,7 @@ def project(x, constraints, weight=1.0, cg_tol=1e-4, cg_maxiter=50, warm=None,
     fm = None if free_mask is None else torch.as_tensor(free_mask).to(x)
 
     def ctv(yblocks):
-        """Cᵀ y in x-space, gated to the free pixels."""
+        """W⁻¹ Cᵀ y in x-space (free_mask is the metric W⁻¹)."""
         xadj = None
         for c, yb in zip(constraints, yblocks):
             g = _adjoint(c, x, yb)
@@ -242,15 +256,17 @@ def project(x, constraints, weight=1.0, cg_tol=1e-4, cg_maxiter=50, warm=None,
 
     def matvec(yflat):
         yblocks = _unflatten(yflat, shapes)
-        xadj = ctv(yblocks)                       # (gated) Cᵀ y
-        return _flatten([c.apply(xadj) for c in constraints])   # C (Cᵀ y)
+        xadj = ctv(yblocks)                       # W⁻¹ Cᵀ y
+        base = _flatten([c.apply(xadj) for c in constraints])   # C W⁻¹ Cᵀ y
+        return base + ridge * yflat if ridge else base          # + Tikhonov term
 
     x0 = warm if (warm is not None and warm.shape == b.shape) else None
     y, iters, rel = _cg(matvec, b, x0=x0, tol=cg_tol, maxiter=cg_maxiter)
 
-    xadj = ctv(_unflatten(y, shapes))
-    x_new = x - weight * xadj
-    return x_new, {"cg_iters": int(iters), "cg_rel": float(rel), "dual": y.detach()}
+    u = ctv(_unflatten(y, shapes))                # control W⁻¹ Cᵀ y
+    x_new = x - weight * u
+    return x_new, {"cg_iters": int(iters), "cg_rel": float(rel), "dual": y.detach(),
+                   "control_norm": float(u.norm().item())}
 
 
 # --------------------------------------------------------------------------
@@ -338,6 +354,20 @@ def tests_constraints(verbose=True):
     res["flow_resid_after"] = resid(fixed)
     res["known_drift"] = float((known * (fixed - corrupt)).abs().max())
 
+    # Augmentation: regularised (soft) control. ridge=0 must reproduce the hard
+    # projection bit-for-bit; ridge>0 trades constraint fidelity for smaller
+    # control effort and better conditioning (fewer CG iters).
+    hard_x, hard = project(corrupt, fc, cg_tol=1e-10, cg_maxiter=400, free_mask=unknown,
+                           ridge=0.0)
+    hard_x2, _ = project(corrupt, fc, cg_tol=1e-10, cg_maxiter=400, free_mask=unknown)
+    soft_x, soft = project(corrupt, fc, cg_tol=1e-10, cg_maxiter=400, free_mask=unknown,
+                           ridge=0.5)
+    res["ridge0_matches_default"] = float((hard_x - hard_x2).abs().max())
+    res["ctrl_norm_hard"] = hard["control_norm"]
+    res["ctrl_norm_soft"] = soft["control_norm"]
+    res["cg_iters_hard"] = float(hard["cg_iters"])
+    res["cg_iters_soft"] = float(soft["cg_iters"])
+
     if verbose:
         for k, v in res.items():
             print(f"  {k:<22} {v:.3e}")
@@ -352,5 +382,11 @@ def tests_constraints(verbose=True):
         raise AssertionError("flow-consistency projection did not reduce the residual")
     if res["known_drift"] != 0.0:
         raise AssertionError("free_mask did not keep observed pixels bit-exact")
+    if res["ridge0_matches_default"] != 0.0:
+        raise AssertionError("ridge=0 does not reproduce the hard projection exactly")
+    if not (res["ctrl_norm_soft"] < res["ctrl_norm_hard"]):
+        raise AssertionError("regularised control did not reduce control effort")
+    if res["cg_iters_soft"] > res["cg_iters_hard"]:
+        raise AssertionError("regularised control did not improve CG conditioning")
     return res
 

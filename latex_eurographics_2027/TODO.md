@@ -30,8 +30,19 @@ nothing implies volumetric/4D support (domain is 2D dynamic video, T×H×W).
       adjoints exact (0 / 1e-8 fp32), known-region projection = blend (4.4e-16),
       masked flow residual 4.97e2 → 1.2e-12, observed pixels bit-exact (drift 0.0),
       warm start 15 → 3 CG iters (40× lower residual at 3-iter budget) — *control pillar* (Table 5)
+- [x] Control augmentation → **constrained control problem**: KKT/saddle form + metric
+      W (free_mask = W⁻¹) + Tikhonov regularised control (ridge λ⁻¹). Validated: ridge=0
+      bit-matches hard projection; ridge 0.5 cuts control effort 16.9→12.1 and CG iters
+      20→15. CG-convergence figure (`benchmark_krylov_control.py` → `figures/krylov_control_convergence.pdf`).
 - [x] FVD made comparable (canonical Kinetics-400 I3D)
-- [x] LaTeX skeleton compiles on stock `article` class, 7 pp, 37 refs, 0 warnings
+- [x] LaTeX skeleton compiles on stock `article` class, **8 pp**, 39 refs, 0 warnings
+
+**Page budget to 10 pp (full paper):** currently 8 pp of written-and-real content
+(3 validated mechanisms + control augmentation + assembly derivation + figure). The
+last ~2 pp are already *scaffolded* and fill once the campaign lands: Table 4
+(inpainting quality), the ablation sweep (incl. control on/off + λ⁻¹ sweep), the
+user study, and the teaser + a qualitative results figure. No prose padding — the
+remaining space is real results, not text.
 
 ---
 

@@ -124,9 +124,13 @@ sample:
   overlap: 1
   # Physical constraints that guide the fill, enforced by a matrix-free Krylov
   # (CG) projection onto {C x = d} after every sampler step. Off by default.
-  # Uncomment to enable; constraint_weight in (0, 1] (1.0 = exact projection):
+  # Uncomment to enable; constraint_weight in (0, 1] (1.0 = exact projection);
+  # constraint_ridge >= 0 is the regularised-control (Tikhonov) term that trades
+  # constraint fidelity for smaller control effort and better CG conditioning
+  # (0 = hard projection):
   #   constraints: [flow_consistency, intensity_conservation]
   #   constraint_weight: 0.7
+  #   constraint_ridge: 0.0
   #   cg_tol: 1.0e-4
   #   cg_maxiter: 50
 
