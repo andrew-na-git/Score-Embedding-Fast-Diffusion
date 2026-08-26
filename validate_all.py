@@ -119,6 +119,10 @@ from fast_diffusion.model import inpaint
 check("inpaint.tests_masked_sampling",
       lambda: inpaint.tests_masked_sampling(verbose=False))
 
+from fast_diffusion.model import constraints as _constraints
+check("constraints.tests_constraints (Krylov-projected control)",
+      lambda: _constraints.tests_constraints(verbose=False))
+
 
 def masks_have_comparable_coverage():
     """Cross-mask comparisons are meaningless at different coverages."""
