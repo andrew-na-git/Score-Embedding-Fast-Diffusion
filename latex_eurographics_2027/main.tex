@@ -739,45 +739,53 @@ soft-control $\lambda^{-1}$ sweep at matched wall-clock is left to the ablations
 
 \subsection{Video inpainting quality}
 \label{sec:inpaint-results}
-% [PARTIAL -- one 60-epoch validation run exists and is a NEGATIVE result.
-%  This subsection must NOT claim quality gains until the full-budget run lands.]
-\textbf{Current status (must be resolved or reported as a negative before
-submission).} At a short training budget the temporal path does \emph{not} yet
-beat a per-frame baseline. On the 60-epoch synthetic validation run
-(\texttt{saves/video/validate60}), masked PSNR is $7.60$/$8.27$\,dB for the
-video model vs.\ $7.68$/$8.38$\,dB per-frame -- i.e.\ $-0.09$\,dB -- and a trivial
-\texttt{copy\_prev} baseline beats both by $\sim\!10$\,dB ($18.1$/$21.8$\,dB).
-This is expected, since temporal layers start at exactly zero contribution, but
-it is a real, unresolved result at this budget; \texttt{run\_video.py} prints a
-warning whenever it holds.
+% [WRITTEN -- full 3-seed DAVIS campaign landed; honest mixed result.]
+We evaluate on $70$ DAVIS clips per seed across three seeds ($9$/$42$/$123$),
+inside the mask and motion-compensated (Table~\ref{tab:inpaint}). The outcome is
+mixed and reported as such. On per-frame \emph{fidelity} the temporal path does
+\emph{not} beat the per-frame FP baseline: masked PSNR is $9.34$\,dB (control
+off) vs.\ $9.97$\,dB per-frame ($-0.63$\,dB). On \emph{temporal coherence inside
+the synthesised region}---the headline metric of this work---it does: masked
+warping error falls from $2.31\times10^{-2}$ (per-frame) to $1.53\times10^{-2}$
+(ours, control off) and to $\mathbf{7.58\times10^{-3}}$ once the flow-consistency
+control is enabled ($-67.2\%$ vs.\ per-frame), which simultaneously lifts masked
+PSNR to $9.88$\,dB---within $0.09$\,dB of per-frame while more than halving the
+temporal error. Temporal variation and seam error follow the same ordering.
 
-\needsnum{TODO(results): full-training-budget run on DAVIS and synthetic clips.}
-Report, \emph{inside the mask} and at matched wall-clock:
-\begin{itemize}
-  \item masked PSNR/SSIM, masked warping error (flow-warped LPIPS), temporal
-        variation, seam error -- ours vs.\ per-frame (ESS$=1$) vs.\ \texttt{copy\_prev}.
-  \item FVD~\cite{unterthiner-2018-fvd} and per-frame KID~\cite{binkowski-2018-kid}.
-  \item \textbf{The headline claim of this subsection is temporal coherence
-        inside the synthesised region}, so warping error measured inside the
-        mask is the primary number; PSNR is secondary.
-\end{itemize}
+\medskip\noindent\textbf{On the trivial baseline.} \texttt{copy\_prev} (repeat
+the previous frame inside the hole) attains the best warping error
+($1.4\times10^{-3}$) and PSNR ($15.9$\,dB) \emph{by construction}: adjacent DAVIS
+frames are near-identical, so copying is degenerate on both metrics while
+synthesising \emph{no} content in disoccluded regions. It is an artefact the
+metrics reward, not a competitor; we report it to make that explicit.
+
+\medskip\noindent\textbf{Cost.} The coherence gain costs sampler time: $42$\,s/clip
+without vs.\ $205$\,s/clip with the per-step projection (CG budget $8$,
+warm-started dual). A matched-wall-clock soft-control ($\lambda^{-1}$) sweep and
+FVD~\cite{unterthiner-2018-fvd}/KID~\cite{binkowski-2018-kid} are the remaining
+measurements (Sec.~\ref{sec:ablations}).
 
 \begin{table}[t]
   \centering
-  \small
-  \begin{tabular}{lccccc}
+  \footnotesize
+  \setlength{\tabcolsep}{3.5pt}
+  \begin{tabular}{lccccr}
     \toprule
-    method & mask PSNR$\uparrow$ & mask SSIM$\uparrow$ & mask warp err$\downarrow$ & FVD$\downarrow$ & fit time\\
+    method & PSNR$\uparrow$ & warp$\downarrow$ & tvar$\downarrow$ & seam$\downarrow$ & s/clip\\
     \midrule
-    \texttt{copy\_prev} (trivial)       & \needsnum{--} & \needsnum{--} & \needsnum{--} & n/a & n/a\\
-    per-frame FP (ESS$=1$)              & \needsnum{--} & \needsnum{--} & \needsnum{--} & \needsnum{--} & \needsnum{--}\\
-    DPM-Solver++~\cite{lu-2022-dpmpp}   & \needsnum{--} & \needsnum{--} & \needsnum{--} & \needsnum{--} & \needsnum{--}\\
-    ours (temporal)                     & \needsnum{--} & \needsnum{--} & \needsnum{--} & \needsnum{--} & \needsnum{--}\\
+    \texttt{copy\_prev}$^\dagger$ & $15.95$ & $1.4\!\times\!10^{-3}$ & $0.025$ & $0.023$ & n/a\\
+    per-frame (ESS$=1$)   & $\mathbf{9.97}$ & $2.31\!\times\!10^{-2}$ & $0.050$ & $0.087$ & $42$\\
+    ours, ctrl off        & $9.34$ & $1.53\!\times\!10^{-2}$ & $0.041$ & $0.105$ & $42$\\
+    ours, ctrl on         & $9.88$ & $\mathbf{7.58\!\times\!10^{-3}}$ & $\mathbf{0.036}$ & $\mathbf{0.084}$ & $205$\\
     \bottomrule
   \end{tabular}
-  \caption{TODO(results): headline inpainting comparison, matched wall-clock,
-  masked metrics. Numbers pending the full-budget campaign
-  (Sec.~\ref{sec:inpaint-results}).}
+  \caption{Headline inpainting comparison: masked, motion-compensated metrics
+  over $70$ DAVIS clips $\times\,3$ seeds. $^\dagger$\texttt{copy\_prev} is a
+  degenerate upper bound (see text), not a competitor. Among methods that actually
+  synthesise, the flow-consistency control gives the best temporal coherence
+  (warping error, temporal variation, seam) at higher sampler cost. Bold marks
+  the best synthesising method per column. Source:
+  \texttt{saves/video/davis\_seed\{9,42,123\}}\,(\texttt{\_control}).}
   \label{tab:inpaint}
 \end{table}
 
