@@ -184,6 +184,16 @@ def main():
     ap.add_argument("--no-score-cache", action="store_true",
                     help="recompute the FP score field even if a cached one exists")
     ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--constraints", nargs="*", default=None,
+                    help="physical constraints for the sampler, e.g. flow_consistency. "
+                         "Applied after any --no-train checkpoint config load.")
+    ap.add_argument("--constraint-ridge", type=float, default=None,
+                    help="Tikhonov regularised-control term (lambda^-1); 0 = hard projection")
+    ap.add_argument("--constraint-weight", type=float, default=None,
+                    help="control step weight in (0, 1]; 1.0 = exact projection")
+    ap.add_argument("--cg-maxiter", type=int, default=None,
+                    help="CG iteration cap per projection; low values rely on the "
+                         "cross-step warm start (default 50)")
     args = ap.parse_args()
 
     path = args.config if os.path.isfile(args.config) else os.path.join(
@@ -243,6 +253,23 @@ def main():
         model.load_state_dict(ckpt["model"])
 
     model = model.to(device).eval()
+
+    # Constraint overrides are applied here, AFTER the --no-train path may have
+    # replaced `config` with the checkpoint's own config -- otherwise they would be
+    # silently clobbered. Lets a control-on ablation reuse a control-off checkpoint.
+    if args.constraints is not None:
+        s_over = config.setdefault("sample", {})
+        s_over["constraints"] = args.constraints
+        if args.constraint_ridge is not None:
+            s_over["constraint_ridge"] = args.constraint_ridge
+        if args.constraint_weight is not None:
+            s_over["constraint_weight"] = args.constraint_weight
+        if args.cg_maxiter is not None:
+            s_over["cg_maxiter"] = args.cg_maxiter
+        print(f"constraints: {args.constraints}  "
+              f"weight={s_over.get('constraint_weight', 1.0)}  "
+              f"ridge={s_over.get('constraint_ridge', 0.0)}  "
+              f"cg_maxiter={s_over.get('cg_maxiter', 50)}")
 
     # ---------------------------------------------------------------- inpaint
     dataset = get_video_dataset(config)

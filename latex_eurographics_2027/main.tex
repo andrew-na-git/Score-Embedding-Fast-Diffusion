@@ -200,7 +200,9 @@ for control---on the numerical foundation of a stable FP solver:
         onto the constraint manifold each step, solved matrix-free by
         conjugate gradients on the SPD normal equations with automatic-
         differentiation adjoints and warm starts across steps. We validate the
-        projection numerically (Sec.~\ref{sec:control-results}).
+        projection numerically and measure its effect on quality: enabling
+        flow-consistency control cuts masked warping error by $50.5\%$ across
+        $70$ DAVIS clips and three seeds (Sec.~\ref{sec:control-results}).
   \item A per-instance \textbf{video inpainting} instantiation with masked,
         motion-compensated evaluation, and an honest account of where the
         temporal path does and does not yet help (Sec.~\ref{sec:exp}).
@@ -665,10 +667,18 @@ cold vs.\ $3.3\times10^{-3}$ warm; Fig.~\ref{fig:cg}). The regularised-control
 augmentation \eqref{eq:reduced-ridge} behaves as designed: a ridge of $0.5$ cuts
 the control effort $\|u\|$ from $16.9$ to $12.1$ and the CG iterations from $20$
 to $15$, and reproduces the hard projection bit-for-bit at $\lambda^{-1}{=}0$.
-\todo{once the full-budget campaign lands, add the \emph{quality} effect of the
-flow-consistency control: masked warping error with vs.\ without control (and a
-$\lambda^{-1}$ sweep) at matched wall-clock, as ablation rows in
-Table~\ref{tab:inpaint}.}
+
+\medskip\noindent\textbf{Effect on inpainting quality.} Beyond the numerical
+residual, the projection improves the synthesised video. Across $70$ DAVIS clips
+and three seeds, enabling flow-consistency control (exact projection,
+$\lambda^{-1}{=}0$, CG budget $8$, warm-started dual) on the \emph{same} trained
+video model cuts the masked warping error---the primary temporal-coherence
+metric---by $\mathbf{50.5\%}$ on average ($1.53\times10^{-2}\to7.58\times10^{-3}$),
+and consistently on every seed ($-51.2\%/{-}56.6\%/{-}33.4\%$;
+Table~\ref{tab:control-quality}). Masked PSNR rises in step by $+0.54$\,dB
+($9.34\to9.88$), so the coherence gain does not trade against per-frame fidelity.
+The gain comes at the per-step projection cost of Fig.~\ref{fig:cg}; a full
+soft-control $\lambda^{-1}$ sweep at matched wall-clock is left to the ablations.
 
 \begin{figure}[t]
   \centering
@@ -702,6 +712,29 @@ Table~\ref{tab:inpaint}.}
   \caption{Krylov-projected control, validated without a trained network. Source:
   \texttt{fast\_diffusion/model/constraints.py} (\texttt{tests\_constraints}).}
   \label{tab:control}
+\end{table}
+
+\begin{table}[t]
+  \centering
+  \small
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{lccc}
+    \toprule
+    seed & warp err (off\,$\to$\,on)$\downarrow$ & $\Delta\%$ & PSNR (off\,$\to$\,on)$\uparrow$\\
+    \midrule
+    9    & $1.69\!\times\!10^{-2}\!\to\!8.24\!\times\!10^{-3}$ & $-51.2$ & $9.21\to9.83$\\
+    42   & $2.10\!\times\!10^{-2}\!\to\!9.11\!\times\!10^{-3}$ & $-56.6$ & $9.19\to9.62$\\
+    123  & $8.09\!\times\!10^{-3}\!\to\!5.38\!\times\!10^{-3}$ & $-33.4$ & $9.63\to10.18$\\
+    \midrule
+    mean & $1.53\!\times\!10^{-2}\!\to\!7.58\!\times\!10^{-3}$ & $\mathbf{-50.5}$ & $9.34\to9.88$\\
+    \bottomrule
+  \end{tabular}
+  \caption{Flow-consistency control on/off, \emph{same} trained video model,
+  $70$ DAVIS clips per seed, exact projection ($\lambda^{-1}{=}0$, CG budget $8$).
+  Control halves the masked warping error (primary temporal metric) and raises
+  masked PSNR on every seed. Source:
+  \texttt{saves/video/davis\_seed\{9,42,123\}}\,(\texttt{\_control}).}
+  \label{tab:control-quality}
 \end{table}
 
 \subsection{Video inpainting quality}
@@ -783,11 +816,13 @@ Design, $n$, and analysis to be added; this is an EG deliverable.}
         Krylov \emph{control} (Sec.~\ref{sec:control}), whose warm start reuses
         the constraint dual across integration steps, not clips. Recorded so the
         solver warm start is not reintroduced.
-  \item \textbf{Control quality effect pending.} The Krylov projection is
-        validated numerically (Sec.~\ref{sec:control-results}), but its effect on
-        inpainting \emph{quality} (masked warping error with vs.\ without control)
-        awaits the full-budget campaign and must be reported as an ablation, not
-        assumed.
+  \item \textbf{Control cost and soft-control sweep.} The Krylov projection is
+        validated numerically and measurably improves temporal coherence (masked
+        warping error $-50.5\%$; Sec.~\ref{sec:control-results}), but it adds a
+        per-step projection cost, and we report only the exact projection
+        ($\lambda^{-1}{=}0$). A full soft-control $\lambda^{-1}$ sweep at matched
+        wall-clock, and the effect on baselines other than the temporal FP model,
+        remain future work.
   \item \textbf{Scale.} Single 8.6\,GB GPU caps clip size; $32\times256\times256$
         ($\sim\!3.8$\,h/clip) is out of scope.
 \end{itemize}
@@ -802,9 +837,9 @@ that reuses warped densities across frames at $7.5\times$ lower per-frame cost -
 is validated and reproducible. On top of it, a matrix-free Krylov projection
 imposes physical linear constraints (temporal flow-consistency foremost) on the
 inpainting sampler, giving explicit, composable control that we validate
-numerically. We instantiate the pipeline for per-instance video
-inpainting. \todo{one sentence stating the headline quality result once the
-full-budget campaign lands; do not write it until the number exists.}
+numerically and that cuts masked warping error by $50.5\%$ across $70$ DAVIS
+clips and three seeds. We instantiate the pipeline for per-instance video
+inpainting.
 
 % ---------------------------------------------------------------------------
 \section*{Acknowledgements}

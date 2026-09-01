@@ -156,12 +156,12 @@ def warp_frame(frame, flow, mode="bilinear", padding_mode="border"):
     an estimate of the current frame.
     """
     frame = torch.as_tensor(frame, dtype=torch.float32)
-    flow = torch.as_tensor(flow, dtype=torch.float32)
+    flow = torch.as_tensor(flow, dtype=torch.float32).to(frame.device)
     C, H, W = frame.shape
 
     yy, xx = torch.meshgrid(
-        torch.arange(H, dtype=torch.float32),
-        torch.arange(W, dtype=torch.float32),
+        torch.arange(H, dtype=torch.float32, device=frame.device),
+        torch.arange(W, dtype=torch.float32, device=frame.device),
         indexing="ij",
     )
     src_x = xx + flow[0]
