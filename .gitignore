@@ -57,3 +57,5 @@ latex_eurographics_2027/*.bbl
 latex_eurographics_2027/*.blg
 latex_eurographics_2027/*.out
 latex_eurographics_2027/*.toc
+
+external/

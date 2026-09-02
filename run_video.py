@@ -346,6 +346,10 @@ def main():
                 r["method"] = name
                 r["clip"] = idx
                 results.append(r)
+                # Persist every method's filled clip so a set-level metric (FVD)
+                # can be computed offline per method without re-sampling.
+                np.save(os.path.join(out_dir, f"{name}_clip{idx}.npy"),
+                        np.asarray(out, dtype=np.float32))
                 print(f"  {name:<10} masked PSNR {r['masked_psnr']:.2f} dB   "
                       f"whole-frame {r['whole_frame_psnr']:.2f} dB   "
                       f"masked warp {r['masked_warping_error']:.4e}")
