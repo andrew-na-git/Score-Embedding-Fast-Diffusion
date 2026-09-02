@@ -1,0 +1,147 @@
+# DAVIS 2017 video inpainting: real footage, real object masks.
+#
+# This is the config the headline inpainting comparison should run on. The synthetic
+# configs (synth_inpaint.yml and friends) exist for controlled ablations where the
+# flow field is known exactly; this one exists because a result on procedural blobs
+# with a rectangular hole is not evidence about video inpainting.
+#
+# What makes it an apples-to-apples comparison:
+#   * masks are DAVIS's own per-object segmentations -- irregular, tracking real
+#     motion, with coverage varying 0.3%-55% across sequences rather than a fixed 6%
+#   * 70 clips of 16 frames clears both metric floors: MIN_FVD_SAMPLES=64 and the
+#     I3D minimum of 9 frames per clip
+#   * FVD is computed on the canonical Kinetics-400 I3D features, so the number is on
+#     the same scale as published FVD
+#
+# Prerequisite:
+#   python download_assets.py           # fetches I3D weights + DAVIS 2017 480p
+#
+# Report masked metrics, never whole-frame ones. At the mean coverage of ~12% a
+# whole-frame PSNR is inflated by about -10*log10(0.12) = 9.2 dB of untouched pixels.
+#
+# NOTE: this file's schema is kept in lock-step with synth_inpaint.yml, which is the
+# reference the code actually reads (run_video.py + train_video.py + network3d.py).
+# The keys below were validated against those readers; do not reintroduce
+# `density_method`, `n_epochs`, a `sampling:` block, or a `model.channels` list --
+# the code reads `kde_method`, `epochs`, `sample:`, and `model.{ch,ch_mult,...}`.
+
+name: davis_inpaint_128
+
+data_loader:
+  dataset: davis
+  root: assets/DAVIS
+  # 'all' uses every sequence with annotations (90). Use 'val' (30) for a held-out
+  # split, but note that this is a per-instance fitting regime, not distribution
+  # learning -- the split is about reporting convention, not about generalisation.
+  split: all
+  year: '2017'
+  # 'all' removes every annotated object, 'largest' just the dominant one. 'all' is
+  # the harder and more standard object-removal task.
+  objects: all
+  # A tight mask leaves a rim of the object's own colour immediately outside the
+  # hole, which a method can copy from and score well without having reconstructed
+  # anything. Dilating by 2 px removes that shortcut.
+  mask_dilate: 2
+  clip_start: 0
+  image_size: 128
+  clip_len: 16
+  num_clips: 70
+  stride: 1
+  seed: 9
+  # Read by train_video._sample_batch; must live in data_loader, not training.
+  batch_size: 4
+
+diffusion:
+  sigma: 5.0
+  dh: 1.0
+  num_timesteps: 20
+  solve_tolerance: 1.0e-4
+
+  # Upwind is not a free choice: it is first-order in space and adds artificial
+  # diffusion of |s|*dh/2 relative to the physical diffusion, but central differencing
+  # loses the M-matrix property at |s|*dh > 2 and diverges outright by |s|*dh ~ 3.
+  # See benchmark_stencil.py for the measured order (0.99 vs 2.04) and boundary.
+  stencil: upwind
+  boundary: neumann
+
+  # 'auto' picks numpy below 96 px and the GPU backend at or above it. At this
+  # resolution (128) that resolves to the GPU backend. Note: 128 px training is
+  # heavy -- measured ~63 min/epoch on 70 clips on an 8 GB laptop GPU (~13 days
+  # for 300 epochs), so this config is intended for a larger GPU.
+  backend: auto
+
+  inner_tolerance: 1.0e-6
+  max_inner_sweeps: 100
+  max_fp_iterations: 100
+
+  # Read by density_method_from_config as diffusion.kde_method. 'histogram' is the
+  # sequential-estimator path exercised by every validated run; 'scipy'/'sklearn'
+  # are the exact O(N^2) references and are far slower at 64x64.
+  kde_method: histogram
+  estimator:
+    n_bins: 256
+    coarse_bins: 64
+    threshold_mode: adaptive
+    kl_factor: 4.0
+    # Floor is load-bearing. With a purely adaptive median threshold the baseline
+    # collapses to ~1e-6 inside a static shot and the trigger fires on noise; the
+    # floor removed three spurious keyframes on the no-cut control.
+    kl_floor: 1.0e-3
+    history_window: 8
+    warmup: 3
+
+training:
+  epochs: 300
+  lr: 1.0e-4
+  grad_clip: False
+  timestep_multiplier: 1
+
+model:
+  max_positions: 10000
+  in_channels: 3
+  out_channels: 3
+  ch: 64
+  ch_mult: [1, 2, 2]
+  num_res_blocks: 1
+  attention_resolutions: [16, ]
+  dropout: 0.1
+  resample_with_conv: True
+  embedding_method: linear
+
+  # Must be >= data_loader.num_clips; train_video checks and refuses otherwise.
+  num_clips: 70
+  max_frames: 512
+
+  # Temporal layers are zero-initialised, so at init the network is exactly its
+  # spatial counterpart. That also means short training budgets will not show a
+  # temporal win (see PLAN.md 8.3 and the gate sweep in TODO.md 1.1).
+  temporal_attention: True
+
+sample:
+  type: inpaint
+  n_steps: 200
+  known_noise: fixed
+  clamp_output: True
+  window: 4
+  overlap: 1
+  # Physical constraints that guide the fill, enforced by a matrix-free Krylov
+  # (CG) projection onto {C x = d} after every sampler step. Off by default.
+  # Uncomment to enable; constraint_weight in (0, 1] (1.0 = exact projection);
+  # constraint_ridge >= 0 is the regularised-control (Tikhonov) term that trades
+  # constraint fidelity for smaller control effort and better CG conditioning
+  # (0 = hard projection):
+  #   constraints: [flow_consistency, intensity_conservation]
+  #   constraint_weight: 0.7
+  #   constraint_ridge: 0.0
+  #   cg_tol: 1.0e-4
+  #   cg_maxiter: 50
+
+evaluation:
+  # Real object masks come from the dataset, so no synthetic mask is generated.
+  mask_kind: dataset
+  flow_method: blockmatch
+  with_lpips: false
+  compute_fvd: true
+
+misc:
+  eps: 1.0e-3
