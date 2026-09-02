@@ -211,6 +211,35 @@ def _sample_batch(clip, scores, config, device, generator=None):
             z.to(device), sc)
 
 
+def _resume_training(ckpt_path, model, optimizer, epochs, n_clips, device):
+    """Restore a partially trained run. Returns (start_epoch, losses) or None.
+
+    The torch RNG state is restored alongside the weights, so a resumed run draws the
+    same batch noise it would have drawn had it never stopped. The checkpoint is
+    rejected rather than adapted when the run's shape changed, because silently
+    resuming into a different schedule would produce a model no config describes.
+    """
+    if not os.path.isfile(ckpt_path):
+        return None
+
+    ck = torch.load(ckpt_path, map_location=device, weights_only=False)
+    if ck.get("epochs") != epochs or ck.get("n_clips") != n_clips:
+        print(f"  ignoring {ckpt_path}: it is a {ck.get('n_clips')}-clip / "
+              f"{ck.get('epochs')}-epoch run, this is {n_clips} / {epochs}")
+        return None
+
+    model.load_state_dict(ck["model"])
+    optimizer.load_state_dict(ck["optimizer"])
+    torch.set_rng_state(ck["cpu_rng"].cpu().to(torch.uint8))
+    if ck.get("cuda_rng") is not None and torch.cuda.is_available():
+        torch.cuda.set_rng_state_all([s.cpu().to(torch.uint8) for s in ck["cuda_rng"]])
+
+    start_epoch = int(ck["epoch"]) + 1
+    losses = np.asarray(ck["losses"], dtype=np.float64)
+    print(f"  resuming from {ckpt_path} at epoch {start_epoch}/{epochs}")
+    return start_epoch, losses
+
+
 def diffuse_train_video(model, dataset, scores, config, save_folder, device=None):
     """Fit the network to the precomputed score fields."""
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -222,10 +251,24 @@ def diffuse_train_video(model, dataset, scores, config, save_folder, device=None
     n_clips = len(dataset)
     T = dataset[0].shape[0]
 
+    # A 300-epoch 128 px fit runs for half a day, so the loop is made restartable:
+    # progress is flushed every `ckpt_every` epochs and picked up automatically on a
+    # rerun into the same folder. Saving does not touch the update rule or the RNG
+    # draw order, so a checkpointed run and an uninterrupted one agree.
+    ckpt_every = int(config["training"].get("checkpoint_every", 10))
+    ckpt_path = os.path.join(save_folder, "train_ckpt.pth") if save_folder else None
+
     losses = np.zeros((n_clips, epochs), dtype=np.float64)
+    start_epoch = 0
+    if ckpt_path:
+        resumed = _resume_training(ckpt_path, model, optimizer, epochs, n_clips, device)
+        if resumed is not None:
+            start_epoch, losses = resumed
+
     t_start = time.time()
 
-    for e in tqdm(range(epochs), desc="epochs"):
+    for e in tqdm(range(start_epoch, epochs), initial=start_epoch, total=epochs,
+                  desc="epochs"):
         for i in range(n_clips):
             clip = torch.as_tensor(np.asarray(dataset[i]), dtype=torch.float32)
             batch, t, diff_std2, std, z, _ = _sample_batch(
@@ -248,6 +291,23 @@ def diffuse_train_video(model, dataset, scores, config, save_folder, device=None
 
         if (e + 1) % max(1, epochs // 10) == 0:
             tqdm.write(f"epoch {e+1}/{epochs}  loss {losses[:, e].mean():.4f}")
+
+        if ckpt_path and ((e + 1) % ckpt_every == 0 or e == epochs - 1):
+            tmp = ckpt_path + ".tmp"
+            torch.save({
+                "model": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "epoch": e,
+                "epochs": epochs,
+                "n_clips": n_clips,
+                "losses": losses,
+                "cpu_rng": torch.get_rng_state(),
+                "cuda_rng": (torch.cuda.get_rng_state_all()
+                             if torch.cuda.is_available() else None),
+            }, tmp)
+            # Replace atomically: a crash during the write must not leave a
+            # half-written checkpoint that the next run would try to resume from.
+            os.replace(tmp, ckpt_path)
 
     return time.time() - t_start, {"losses": losses}
 
